@@ -11,12 +11,7 @@ type VoteRow = {
   artist: string;
 };
 
-type PlayedSongRow = {
-  song_id: number;
-  song_title: string;
-  artist: string;
-  played_at: string;
-};
+
 
 type VoteResult = {
   songId: number;
@@ -25,6 +20,7 @@ type VoteResult = {
   votes: number;
   isPlayed: boolean;
   playedAt: string | null;
+  setlistItemId: number | null;
 };
 
 export default function AdminPage() {
@@ -45,7 +41,7 @@ export default function AdminPage() {
 
   const [newConcertName, setNewConcertName] =
     useState("");
-  
+
 
   const loadVotes = useCallback(async (showLoading = false) => {
     if (showLoading) {
@@ -58,26 +54,27 @@ export default function AdminPage() {
       const concertId = await getActiveConcertId();
 
       const [
-        votesResponse,
-        playedSongsResponse,
-        currentSongResponse,
-      ] = await Promise.all([
-        supabase
-          .from("votes")
-          .select("song_id, song_title, artist")
-          .eq("concert_id", concertId),
+  votesResponse,
+  currentSongResponse,
+  setlistItemsResponse,
+] = await Promise.all([
+  supabase
+    .from("votes")
+    .select("song_id, song_title, artist")
+    .eq("concert_id", concertId),
 
-        supabase
-          .from("played_songs")
-          .select("song_id, song_title, artist, played_at")
-          .eq("concert_id", concertId),
+  supabase
+    .from("current_song")
+    .select("song_id")
+    .eq("concert_id", concertId)
+    .maybeSingle(),
 
-        supabase
-          .from("current_song")
-          .select("song_id")
-          .eq("concert_id", concertId)
-          .maybeSingle(),
-      ]);
+  supabase
+    .from("setlist_items")
+    .select(
+      "id, song_id, assigned_song_id, is_played, played_at",
+    ),
+]);
 
       if (votesResponse.error) {
         console.error(
@@ -94,20 +91,7 @@ export default function AdminPage() {
         return;
       }
 
-      if (playedSongsResponse.error) {
-        console.error(
-          "Fehler beim Laden der gespielten Songs:",
-          playedSongsResponse.error,
-        );
-
-        setErrorMessage(
-          "Der Gespielt-Status konnte nicht geladen werden.",
-        );
-
-        setLoading(false);
-        setIsRefreshing(false);
-        return;
-      }
+      
 
       if (currentSongResponse.error) {
         console.error(
@@ -124,30 +108,81 @@ export default function AdminPage() {
         return;
       }
 
-      const playedSongs = new Map<number, PlayedSongRow>();
+      
+      if (setlistItemsResponse.error) {
+        console.error(
+          "Fehler beim Laden der Setlist-Einträge:",
+          setlistItemsResponse.error,
+        );
 
-      (playedSongsResponse.data as PlayedSongRow[]).forEach((song) => {
-        playedSongs.set(song.song_id, song);
+        setErrorMessage(
+          "Die Zuordnung zur Setlist konnte nicht geladen werden.",
+        );
+
+        setLoading(false);
+        setIsRefreshing(false);
+        return;
+      }
+
+      type SetlistStatus = {
+        id: number;
+        isPlayed: boolean;
+        playedAt: string | null;
+      };
+
+      const setlistItemBySongId =
+        new Map<number, SetlistStatus>();
+
+      (
+        setlistItemsResponse.data as {
+          id: number;
+          song_id: number | null;
+          assigned_song_id: number | null;
+          is_played: boolean;
+          played_at: string | null;
+        }[]
+      ).forEach((item) => {
+        const status: SetlistStatus = {
+          id: item.id,
+          isPlayed: item.is_played,
+          playedAt: item.played_at,
+        };
+
+        if (item.song_id !== null) {
+          setlistItemBySongId.set(item.song_id, status);
+        }
+
+        if (item.assigned_song_id !== null) {
+          setlistItemBySongId.set(
+            item.assigned_song_id,
+            status,
+          );
+        }
       });
-
       const groupedVotes = new Map<number, VoteResult>();
 
       (votesResponse.data as VoteRow[]).forEach((vote) => {
         const existingSong = groupedVotes.get(vote.song_id);
-        const playedSong = playedSongs.get(vote.song_id);
+
 
         if (existingSong) {
           existingSong.votes += 1;
           return;
         }
 
+
+
+        const setlistItem =
+          setlistItemBySongId.get(vote.song_id);
+
         groupedVotes.set(vote.song_id, {
           songId: vote.song_id,
           songTitle: vote.song_title,
           artist: vote.artist,
           votes: 1,
-          isPlayed: Boolean(playedSong),
-          playedAt: playedSong?.played_at ?? null,
+          isPlayed: setlistItem?.isPlayed ?? false,
+          playedAt: setlistItem?.playedAt ?? null,
+          setlistItemId: setlistItem?.id ?? null,
         });
       });
 
@@ -217,25 +252,69 @@ export default function AdminPage() {
     setErrorMessage("");
 
     try {
-      const concertId = await getActiveConcertId();
+      let setlistItemId = song.setlistItemId;
+
+      // Falls die Zuordnung im Browser noch nicht aktualisiert wurde,
+      // den passenden Setlist-Eintrag direkt aus Supabase laden.
+      if (setlistItemId === null) {
+        const { data: setlistItem, error: setlistItemError } =
+          await supabase
+            .from("setlist_items")
+            .select("id")
+            .or(
+              `song_id.eq.${song.songId},assigned_song_id.eq.${song.songId}`,
+            )
+            .limit(1)
+            .maybeSingle();
+
+        if (setlistItemError) {
+          console.error("Fehler beim Suchen des Setlist-Eintrags:", {
+            message: setlistItemError.message,
+            code: setlistItemError.code,
+            details: setlistItemError.details,
+            hint: setlistItemError.hint,
+          });
+
+          setErrorMessage(
+            "Der passende Eintrag in der Setlist konnte nicht gefunden werden.",
+          );
+
+          setChangingSongId(null);
+          return;
+        }
+
+        if (!setlistItem) {
+          setErrorMessage(
+            "Der Song befindet sich noch nicht in der Setlist. Klicke zuerst auf „Jetzt spielen“.",
+          );
+
+          setChangingSongId(null);
+          return;
+        }
+
+        setlistItemId = setlistItem.id;
+      }
+
+      const playedAt = new Date().toISOString();
 
       const { error } = await supabase
-        .from("played_songs")
-        .insert({
-          concert_id: concertId,
-          song_id: song.songId,
-          song_title: song.songTitle,
-          artist: song.artist,
-        });
+        .from("setlist_items")
+        .update({
+          is_played: true,
+          played_at: playedAt,
+        })
+        .eq("id", setlistItemId);
 
       if (error) {
-        console.error(
-          "Fehler beim Markieren als gespielt:",
-          error,
-        );
+        console.error("Fehler beim Markieren als gespielt:", {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+        });
 
         setErrorMessage(
-          "Der Song konnte nicht als gespielt markiert werden.",
+          `Der Song konnte nicht als gespielt markiert werden: ${error.message}`,
         );
 
         setChangingSongId(null);
@@ -246,12 +325,12 @@ export default function AdminPage() {
       setChangingSongId(null);
     } catch (error) {
       console.error(
-        "Fehler beim Laden des aktiven Konzerts:",
+        "Unerwarteter Fehler beim Markieren als gespielt:",
         error,
       );
 
       setErrorMessage(
-        "Der Song konnte keinem aktiven Konzert zugeordnet werden.",
+        "Beim Markieren als gespielt ist ein unerwarteter Fehler aufgetreten.",
       );
 
       setChangingSongId(null);
@@ -259,47 +338,60 @@ export default function AdminPage() {
   }
 
   async function undoPlayed(songId: number) {
-    setChangingSongId(songId);
-    setErrorMessage("");
+  setChangingSongId(songId);
+  setErrorMessage("");
 
-    try {
-      const concertId = await getActiveConcertId();
+  try {
+    const song = results.find(
+      (result) => result.songId === songId,
+    );
 
-      const { error } = await supabase
-        .from("played_songs")
-        .delete()
-        .eq("concert_id", concertId)
-        .eq("song_id", songId);
+    if (!song?.setlistItemId) {
+      setErrorMessage(
+        "Der passende Setlist-Eintrag konnte nicht gefunden werden.",
+      );
 
-      if (error) {
-        console.error(
-          "Fehler beim Rückgängigmachen:",
-          error,
-        );
-
-        setErrorMessage(
-          "Der Gespielt-Status konnte nicht rückgängig gemacht werden.",
-        );
-
-        setChangingSongId(null);
-        return;
-      }
-
-      await loadVotes();
       setChangingSongId(null);
-    } catch (error) {
+      return;
+    }
+
+    const { error } = await supabase
+      .from("setlist_items")
+      .update({
+        is_played: false,
+        played_at: null,
+      })
+      .eq("id", song.setlistItemId);
+
+    if (error) {
       console.error(
-        "Fehler beim Laden des aktiven Konzerts:",
+        "Fehler beim Rückgängigmachen:",
         error,
       );
 
       setErrorMessage(
-        "Das aktive Konzert konnte nicht gefunden werden.",
+        "Der Gespielt-Status konnte nicht rückgängig gemacht werden.",
       );
 
       setChangingSongId(null);
+      return;
     }
+
+    await loadVotes();
+    setChangingSongId(null);
+  } catch (error) {
+    console.error(
+      "Fehler beim Rückgängigmachen:",
+      error,
+    );
+
+    setErrorMessage(
+      "Der Gespielt-Status konnte nicht rückgängig gemacht werden.",
+    );
+
+    setChangingSongId(null);
   }
+}
 
   async function setCurrentSong(song: VoteResult) {
     setChangingSongId(song.songId);
@@ -308,11 +400,101 @@ export default function AdminPage() {
     try {
       const concertId = await getActiveConcertId();
 
-      const { error } = await supabase
+      // Prüfen, ob dieser Publikumswunsch bereits einem
+      // Wunschsong-Platzhalter zugewiesen wurde.
+      const { data: existingRequest, error: existingRequestError } =
+        await supabase
+          .from("setlist_items")
+          .select("id")
+          .eq("item_type", "request")
+          .eq("assigned_song_id", song.songId)
+          .maybeSingle();
+
+      if (existingRequestError) {
+        console.error(
+          "Fehler beim Prüfen des Wunschsongs:",
+          existingRequestError,
+        );
+
+        setErrorMessage(
+          "Der Wunschsong konnte nicht geprüft werden.",
+        );
+
+        setChangingSongId(null);
+        return;
+      }
+
+      let setlistItemId: number;
+
+      if (existingRequest) {
+        // Der Song wurde bereits einem Platzhalter zugewiesen.
+        setlistItemId = existingRequest.id;
+      } else {
+        // Den ersten freien Wunschsong-Platzhalter suchen.
+        const { data: freeRequest, error: freeRequestError } =
+          await supabase
+            .from("setlist_items")
+            .select("id")
+            .eq("item_type", "request")
+            .is("assigned_song_id", null)
+            .order("position", { ascending: true })
+            .limit(1)
+            .maybeSingle();
+
+        if (freeRequestError) {
+          console.error(
+            "Fehler beim Suchen eines freien Wunschsongs:",
+            freeRequestError,
+          );
+
+          setErrorMessage(
+            "Ein freier Wunschsong-Platzhalter konnte nicht gesucht werden.",
+          );
+
+          setChangingSongId(null);
+          return;
+        }
+
+        if (!freeRequest) {
+          setErrorMessage(
+            "Es gibt keinen freien Wunschsong-Platzhalter in der Setlist.",
+          );
+
+          setChangingSongId(null);
+          return;
+        }
+
+        const { error: assignError } = await supabase
+          .from("setlist_items")
+          .update({
+            assigned_song_id: song.songId,
+          })
+          .eq("id", freeRequest.id);
+
+        if (assignError) {
+          console.error(
+            "Fehler beim Füllen des Wunschsong-Platzhalters:",
+            assignError,
+          );
+
+          setErrorMessage(
+            "Der Song konnte nicht in die Setlist übernommen werden.",
+          );
+
+          setChangingSongId(null);
+          return;
+        }
+
+        setlistItemId = freeRequest.id;
+      }
+
+      // Den zugewiesenen Setlist-Eintrag als aktuellen Song speichern.
+      const { error: currentSongError } = await supabase
         .from("current_song")
         .upsert(
           {
             concert_id: concertId,
+            setlist_item_id: setlistItemId,
             song_id: song.songId,
             song_title: song.songTitle,
             artist: song.artist,
@@ -323,10 +505,10 @@ export default function AdminPage() {
           },
         );
 
-      if (error) {
+      if (currentSongError) {
         console.error(
           "Fehler beim Setzen des aktuellen Songs:",
-          error,
+          currentSongError,
         );
 
         setErrorMessage(
@@ -500,7 +682,7 @@ export default function AdminPage() {
     <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-8 text-white sm:px-8">
       <div className="mx-auto max-w-5xl">
         <AdminNavigation />
-        
+
         <header className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-bold uppercase tracking-[0.3em] text-red-500">
@@ -589,7 +771,7 @@ export default function AdminPage() {
             {errorMessage}
           </div>
         )}
-        
+
         <section className="mt-8">
           <div className="mb-4 flex items-end justify-between">
             <div>
