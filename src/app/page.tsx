@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabase";
 import { getActiveConcertId } from "./lib/concert";
-import { songs } from "./data/songs";
 import { getDeviceId } from "./lib/device";
 
 type Screen = "landing" | "vote" | "thanks";
@@ -24,6 +23,7 @@ function normalizeSearchText(text: string) {
 }
 
 export default function Home() {
+  const [songs, setSongs] = useState<Song[]>([]);
   const [screen, setScreen] = useState<Screen>("landing");
   const [selectedSongIds, setSelectedSongIds] = useState<number[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -58,6 +58,26 @@ useEffect(() => {
 
   checkExistingVote();
 }, []);
+
+useEffect(() => {
+  async function loadSongs() {
+    const { data, error } = await supabase
+      .from("songs")
+      .select("id, title, artist")
+      .eq("is_active", true)
+      .order("title");
+
+    if (error) {
+      console.error("Fehler beim Laden der Songs:", error);
+      return;
+    }
+
+    setSongs(data ?? []);
+  }
+
+  loadSongs();
+}, []);
+
 const filteredSongs = useMemo(() => {
   const normalizedQuery = normalizeSearchText(searchTerm);
 
@@ -78,11 +98,11 @@ const filteredSongs = useMemo(() => {
       normalizedCombined.includes(normalizedQuery)
     );
   });
-}, [searchTerm]);
+}, [songs, searchTerm]);
 
   const selectedSongs = useMemo(() => {
-    return songs.filter((song) => selectedSongIds.includes(song.id));
-  }, [selectedSongIds]);
+  return songs.filter((song) => selectedSongIds.includes(song.id));
+}, [songs, selectedSongIds]);
 
   function toggleSong(songId: number) {
     setSubmitError("");

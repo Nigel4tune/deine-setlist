@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getActiveConcertId } from "../lib/concert";
 import { supabase } from "../lib/supabase";
+import AdminNavigation from "../components/AdminNavigation";
 
 type VoteRow = {
   song_id: number;
@@ -40,10 +41,11 @@ export default function AdminPage() {
   );
 
   const [showNewConcertDialog, setShowNewConcertDialog] =
-  useState(false);
+    useState(false);
 
-const [newConcertName, setNewConcertName] =
-  useState("");
+  const [newConcertName, setNewConcertName] =
+    useState("");
+  
 
   const loadVotes = useCallback(async (showLoading = false) => {
     if (showLoading) {
@@ -170,7 +172,7 @@ const [newConcertName, setNewConcertName] =
       setLastUpdated(new Date());
       setLoading(false);
       setIsRefreshing(false);
-        } catch {
+    } catch {
       setResults([]);
       setCurrentSongId(null);
       setLastUpdated(null);
@@ -307,19 +309,19 @@ const [newConcertName, setNewConcertName] =
       const concertId = await getActiveConcertId();
 
       const { error } = await supabase
-  .from("current_song")
-  .upsert(
-    {
-      concert_id: concertId,
-      song_id: song.songId,
-      song_title: song.songTitle,
-      artist: song.artist,
-      updated_at: new Date().toISOString(),
-    },
-    {
-      onConflict: "concert_id",
-    },
-  );
+        .from("current_song")
+        .upsert(
+          {
+            concert_id: concertId,
+            song_id: song.songId,
+            song_title: song.songTitle,
+            artist: song.artist,
+            updated_at: new Date().toISOString(),
+          },
+          {
+            onConflict: "concert_id",
+          },
+        );
 
       if (error) {
         console.error(
@@ -347,78 +349,78 @@ const [newConcertName, setNewConcertName] =
         "Das aktive Konzert konnte nicht gefunden werden.",
       );
 
-       setChangingSongId(null);
+      setChangingSongId(null);
     }
   }
 
   async function startNewConcert() {
-  if (!newConcertName.trim()) {
-    alert("Bitte gib einen Konzertnamen ein.");
-    return;
-  }
-
-  setErrorMessage("");
-
-  try {
-    const { error: deactivateError } = await supabase
-      .from("concerts")
-      .update({
-        is_active: false,
-      })
-      .eq("is_active", true);
-
-    if (deactivateError) {
-      console.error(
-        "Fehler beim Deaktivieren des alten Konzerts:",
-        deactivateError,
-      );
-
-      setErrorMessage(
-        "Das bisherige Konzert konnte nicht beendet werden.",
-      );
-
+    if (!newConcertName.trim()) {
+      alert("Bitte gib einen Konzertnamen ein.");
       return;
     }
 
-    const { data: newConcert, error: createError } =
-      await supabase
+    setErrorMessage("");
+
+    try {
+      const { error: deactivateError } = await supabase
         .from("concerts")
-        .insert({
-          name: newConcertName.trim(),
-          is_active: true,
+        .update({
+          is_active: false,
         })
-        .select("id")
-        .single();
+        .eq("is_active", true);
 
-    if (createError || !newConcert) {
+      if (deactivateError) {
+        console.error(
+          "Fehler beim Deaktivieren des alten Konzerts:",
+          deactivateError,
+        );
+
+        setErrorMessage(
+          "Das bisherige Konzert konnte nicht beendet werden.",
+        );
+
+        return;
+      }
+
+      const { data: newConcert, error: createError } =
+        await supabase
+          .from("concerts")
+          .insert({
+            name: newConcertName.trim(),
+            is_active: true,
+          })
+          .select("id")
+          .single();
+
+      if (createError || !newConcert) {
+        console.error(
+          "Fehler beim Erstellen des neuen Konzerts:",
+          createError,
+        );
+
+        setErrorMessage(
+          "Das neue Konzert konnte nicht erstellt werden.",
+        );
+
+        return;
+      }
+
+      setShowNewConcertDialog(false);
+      setNewConcertName("");
+      setCurrentSongId(null);
+
+      await loadVotes(true);
+    } catch (error) {
       console.error(
-        "Fehler beim Erstellen des neuen Konzerts:",
-        createError,
+        "Fehler beim Starten des neuen Konzerts:",
+        error,
       );
 
       setErrorMessage(
-        "Das neue Konzert konnte nicht erstellt werden.",
+        "Beim Starten des neuen Konzerts ist ein Fehler aufgetreten.",
       );
-
-      return;
     }
-
-    setShowNewConcertDialog(false);
-    setNewConcertName("");
-    setCurrentSongId(null);
-
-    await loadVotes(true);
-  } catch (error) {
-    console.error(
-      "Fehler beim Starten des neuen Konzerts:",
-      error,
-    );
-
-    setErrorMessage(
-      "Beim Starten des neuen Konzerts ist ein Fehler aufgetreten.",
-    );
   }
-}
 
   function getPositionLabel(index: number) {
     if (index === 0) {
@@ -437,66 +439,68 @@ const [newConcertName, setNewConcertName] =
   }
 
   async function endConcert() {
-  const confirmed = window.confirm(
-    "Möchtest du das aktuelle Konzert wirklich beenden?",
-  );
-
-  if (!confirmed) {
-    return;
-  }
-
-  const { data: activeConcert, error: concertError } = await supabase
-    .from("concerts")
-    .select("id")
-    .eq("is_active", true)
-    .maybeSingle();
-
-  if (concertError) {
-    console.error(
-      "Aktives Konzert konnte nicht geladen werden:",
-      concertError.message,
+    const confirmed = window.confirm(
+      "Möchtest du das aktuelle Konzert wirklich beenden?",
     );
-    return;
+
+    if (!confirmed) {
+      return;
+    }
+
+    const { data: activeConcert, error: concertError } = await supabase
+      .from("concerts")
+      .select("id")
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (concertError) {
+      console.error(
+        "Aktives Konzert konnte nicht geladen werden:",
+        concertError.message,
+      );
+      return;
+    }
+
+    if (!activeConcert) {
+      alert("Es gibt aktuell kein aktives Konzert.");
+      return;
+    }
+
+    const { error: currentSongError } = await supabase
+      .from("current_song")
+      .delete()
+      .eq("concert_id", activeConcert.id);
+
+    if (currentSongError) {
+      console.error(
+        "Aktueller Song konnte nicht entfernt werden:",
+        currentSongError.message,
+      );
+      return;
+    }
+
+    const { error: updateError } = await supabase
+      .from("concerts")
+      .update({ is_active: false })
+      .eq("id", activeConcert.id);
+
+    if (updateError) {
+      console.error(
+        "Konzert konnte nicht beendet werden:",
+        updateError.message,
+      );
+      return;
+    }
+
+    alert("Das Konzert wurde beendet.");
+    window.location.reload();
   }
-
-  if (!activeConcert) {
-    alert("Es gibt aktuell kein aktives Konzert.");
-    return;
-  }
-
-  const { error: currentSongError } = await supabase
-    .from("current_song")
-    .delete()
-    .eq("concert_id", activeConcert.id);
-
-  if (currentSongError) {
-    console.error(
-      "Aktueller Song konnte nicht entfernt werden:",
-      currentSongError.message,
-    );
-    return;
-  }
-
-  const { error: updateError } = await supabase
-    .from("concerts")
-    .update({ is_active: false })
-    .eq("id", activeConcert.id);
-
-  if (updateError) {
-    console.error(
-      "Konzert konnte nicht beendet werden:",
-      updateError.message,
-    );
-    return;
-  }
-
-  alert("Das Konzert wurde beendet.");
-  window.location.reload();
-}
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-8 text-white sm:px-8">
       <div className="mx-auto max-w-5xl">
+        <AdminNavigation />
+        
         <header className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-bold uppercase tracking-[0.3em] text-red-500">
@@ -514,22 +518,22 @@ const [newConcertName, setNewConcertName] =
           </div>
 
           <div className="flex gap-3">
-  <button
-  type="button"
-  onClick={() => setShowNewConcertDialog(true)}
-  className="rounded-2xl bg-green-600 px-6 py-4 font-black transition hover:bg-green-500"
-  >
-    ➕ Neues Konzert
-  </button>
+            <button
+              type="button"
+              onClick={() => setShowNewConcertDialog(true)}
+              className="rounded-2xl bg-green-600 px-6 py-4 font-black transition hover:bg-green-500"
+            >
+              ➕ Neues Konzert
+            </button>
 
-  <button
-  onClick={endConcert}
-  className="rounded-2xl bg-orange-600 px-6 py-5 text-xl font-bold text-white transition hover:bg-orange-500"
->
-  Konzert beenden
-</button>
+            <button
+              onClick={endConcert}
+              className="rounded-2xl bg-orange-600 px-6 py-5 text-xl font-bold text-white transition hover:bg-orange-500"
+            >
+              Konzert beenden
+            </button>
 
-</div>
+          </div>
         </header>
 
         <section className="mt-8 grid gap-4 sm:grid-cols-4">
@@ -571,10 +575,10 @@ const [newConcertName, setNewConcertName] =
             <p className="mt-3 text-xl font-bold">
               {lastUpdated
                 ? lastUpdated.toLocaleTimeString("de-DE", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    second: "2-digit",
-                  })
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                })
                 : "Noch nicht geladen"}
             </p>
           </article>
@@ -585,7 +589,7 @@ const [newConcertName, setNewConcertName] =
             {errorMessage}
           </div>
         )}
-
+        
         <section className="mt-8">
           <div className="mb-4 flex items-end justify-between">
             <div>
@@ -634,11 +638,10 @@ const [newConcertName, setNewConcertName] =
                 return (
                   <article
                     key={song.songId}
-                    className={`overflow-hidden rounded-2xl border p-5 shadow-lg ${
-                      isTopThree
-                        ? "border-red-500/40 bg-zinc-900"
-                        : "border-white/10 bg-zinc-900/70"
-                    }`}
+                    className={`overflow-hidden rounded-2xl border p-5 shadow-lg ${isTopThree
+                      ? "border-red-500/40 bg-zinc-900"
+                      : "border-white/10 bg-zinc-900/70"
+                      }`}
                   >
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
                       <div className="flex min-w-12 items-center justify-center text-xl font-black">
@@ -685,11 +688,10 @@ const [newConcertName, setNewConcertName] =
                           type="button"
                           onClick={() => setCurrentSong(song)}
                           disabled={isChanging}
-                          className={`rounded-xl px-5 py-3 font-black transition ${
-                            currentSongId === song.songId
-                              ? "bg-blue-700"
-                              : "bg-blue-600 hover:bg-blue-500"
-                          }`}
+                          className={`rounded-xl px-5 py-3 font-black transition ${currentSongId === song.songId
+                            ? "bg-blue-700"
+                            : "bg-blue-600 hover:bg-blue-500"
+                            }`}
                         >
                           {currentSongId === song.songId
                             ? "🎤 Läuft gerade"
@@ -795,7 +797,7 @@ const [newConcertName, setNewConcertName] =
               })}
             </div>
           </section>
-  )}
+        )}
       </div>
 
       {showNewConcertDialog && (
@@ -825,12 +827,12 @@ const [newConcertName, setNewConcertName] =
               </button>
 
               <button
-  type="button"
-  onClick={startNewConcert}
-  className="rounded-xl bg-green-600 px-5 py-3 font-bold"
->
-  Konzert starten
-</button>
+                type="button"
+                onClick={startNewConcert}
+                className="rounded-xl bg-green-600 px-5 py-3 font-bold"
+              >
+                Konzert starten
+              </button>
             </div>
           </div>
         </div>
