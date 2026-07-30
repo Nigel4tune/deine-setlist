@@ -20,6 +20,7 @@ import { CSS } from "@dnd-kit/utilities";
 
 type SetlistItem = {
     id: number;
+    setlistItemId: number;
     title: string;
     artist: string;
     itemType: "song" | "request";
