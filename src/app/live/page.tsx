@@ -10,11 +10,12 @@ type VoteRow = {
   artist: string;
 };
 
-type PlayedSongRow = {
-  song_id: number;
-  song_title: string;
-  artist: string;
-  played_at: string;
+type SetlistItemRow = {
+  id: number;
+  song_id: number | null;
+  assigned_song_id: number | null;
+  is_played: boolean;
+  played_at: string | null;
 };
 
 type CurrentSongRow = {
@@ -45,29 +46,31 @@ export default function LivePage() {
 const loadLiveResults = useCallback(async () => {
   setErrorMessage("");
 
-  const concertId = await getActiveConcertId();
+  try {
+    const concertId = await getActiveConcertId();
 
-  const [
-    votesResponse,
-    playedSongsResponse,
-    currentSongResponse,
-  ] = await Promise.all([
-    supabase
-      .from("votes")
-      .select("song_id, song_title, artist")
-      .eq("concert_id", concertId),
+    const [
+      votesResponse,
+      setlistItemsResponse,
+      currentSongResponse,
+    ] = await Promise.all([
+      supabase
+        .from("votes")
+        .select("song_id, song_title, artist")
+        .eq("concert_id", concertId),
 
-    supabase
-      .from("played_songs")
-      .select("song_id, song_title, artist, played_at")
-      .eq("concert_id", concertId),
+      supabase
+        .from("setlist_items")
+        .select(
+          "id, song_id, assigned_song_id, is_played, played_at",
+        ),
 
-    supabase
-      .from("current_song")
-      .select("song_id, song_title, artist, updated_at")
-      .eq("concert_id", concertId)
-      .maybeSingle(),
-  ]);
+      supabase
+        .from("current_song")
+        .select("song_id, song_title, artist, updated_at")
+        .eq("concert_id", concertId)
+        .maybeSingle(),
+    ]);
 
     if (votesResponse.error) {
       console.error(
@@ -83,10 +86,10 @@ const loadLiveResults = useCallback(async () => {
       return;
     }
 
-    if (playedSongsResponse.error) {
+    if (setlistItemsResponse.error) {
       console.error(
-        "Fehler beim Laden der gespielten Songs:",
-        playedSongsResponse.error,
+        "Fehler beim Laden der Setlist-Einträge:",
+        setlistItemsResponse.error,
       );
 
       setErrorMessage(
@@ -111,57 +114,96 @@ const loadLiveResults = useCallback(async () => {
       return;
     }
 
-    const playedSongsMap = new Map<number, PlayedSongRow>();
+    const setlistItemBySongId = new Map<
+      number,
+      {
+        isPlayed: boolean;
+        playedAt: string | null;
+      }
+    >();
 
-    (playedSongsResponse.data as PlayedSongRow[]).forEach((song) => {
-      playedSongsMap.set(song.song_id, song);
+    (
+      setlistItemsResponse.data as SetlistItemRow[]
+    ).forEach((item) => {
+      const status = {
+        isPlayed: item.is_played,
+        playedAt: item.played_at,
+      };
+
+      if (item.song_id !== null) {
+        setlistItemBySongId.set(item.song_id, status);
+      }
+
+      if (item.assigned_song_id !== null) {
+        setlistItemBySongId.set(
+          item.assigned_song_id,
+          status,
+        );
+      }
     });
 
     const groupedSongs = new Map<number, SongResult>();
 
     (votesResponse.data as VoteRow[]).forEach((vote) => {
       const existingSong = groupedSongs.get(vote.song_id);
-      const playedSong = playedSongsMap.get(vote.song_id);
 
       if (existingSong) {
         existingSong.votes += 1;
         return;
       }
 
+      const setlistItem =
+        setlistItemBySongId.get(vote.song_id);
+
       groupedSongs.set(vote.song_id, {
         songId: vote.song_id,
         songTitle: vote.song_title,
         artist: vote.artist,
         votes: 1,
-        isPlayed: Boolean(playedSong),
-        playedAt: playedSong?.played_at ?? null,
+        isPlayed: setlistItem?.isPlayed ?? false,
+        playedAt: setlistItem?.playedAt ?? null,
       });
     });
 
-    const sortedSongs = Array.from(groupedSongs.values()).sort(
-      (a, b) => {
-        if (a.isPlayed !== b.isPlayed) {
-          return a.isPlayed ? 1 : -1;
-        }
+    const sortedSongs = Array.from(
+      groupedSongs.values(),
+    ).sort((a, b) => {
+      if (a.isPlayed !== b.isPlayed) {
+        return a.isPlayed ? 1 : -1;
+      }
 
-        if (b.votes !== a.votes) {
-          return b.votes - a.votes;
-        }
+      if (b.votes !== a.votes) {
+        return b.votes - a.votes;
+      }
 
-        return a.songTitle.localeCompare(b.songTitle, "de");
-      },
-    );
+      return a.songTitle.localeCompare(
+        b.songTitle,
+        "de",
+      );
+    });
 
     setSongs(sortedSongs);
 
-setCurrentSong(
-  currentSongResponse.data
-    ? (currentSongResponse.data as CurrentSongRow)
-    : null,
-);
+    setCurrentSong(
+      currentSongResponse.data
+        ? (currentSongResponse.data as CurrentSongRow)
+        : null,
+    );
 
-setLastUpdated(new Date());
-setLoading(false);
+    setLastUpdated(new Date());
+    setLoading(false);
+  } catch (error) {
+    console.error(
+      "Unerwarteter Fehler beim Laden der Live-Seite:",
+      error,
+    );
+
+    setErrorMessage(
+      "Die Live-Ergebnisse konnten gerade nicht geladen werden.",
+    );
+
+    setLoading(false);
+  }
 }, []);
 
   useEffect(() => {

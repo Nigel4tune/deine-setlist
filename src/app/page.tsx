@@ -161,13 +161,15 @@ const votes = selectedSongs.map((song) => ({
 const { error } = await supabase.from("votes").insert(votes);
 
     if (error) {
-      console.error("Fehler beim Speichern:", error);
-      setSubmitError(
-        "Deine Wünsche konnten nicht gespeichert werden. Bitte versuche es noch einmal.",
-      );
-      setIsSubmitting(false);
-      return;
-    }
+  console.error("Fehler beim Speichern:", error);
+
+  setSubmitError(
+    "Deine Wünsche konnten nicht gespeichert werden. Bitte versuche es noch einmal.",
+  );
+
+  setIsSubmitting(false);
+  return;
+}
 
     setIsSubmitting(false);
     setScreen("thanks");

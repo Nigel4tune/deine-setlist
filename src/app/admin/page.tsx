@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { getActiveConcertId } from "../lib/concert";
 import { supabase } from "../lib/supabase";
 import AdminNavigation from "../components/AdminNavigation";
@@ -54,27 +55,27 @@ export default function AdminPage() {
       const concertId = await getActiveConcertId();
 
       const [
-  votesResponse,
-  currentSongResponse,
-  setlistItemsResponse,
-] = await Promise.all([
-  supabase
-    .from("votes")
-    .select("song_id, song_title, artist")
-    .eq("concert_id", concertId),
+        votesResponse,
+        currentSongResponse,
+        setlistItemsResponse,
+      ] = await Promise.all([
+        supabase
+          .from("votes")
+          .select("song_id, song_title, artist")
+          .eq("concert_id", concertId),
 
-  supabase
-    .from("current_song")
-    .select("song_id")
-    .eq("concert_id", concertId)
-    .maybeSingle(),
+        supabase
+          .from("current_song")
+          .select("song_id")
+          .eq("concert_id", concertId)
+          .maybeSingle(),
 
-  supabase
-    .from("setlist_items")
-    .select(
-      "id, song_id, assigned_song_id, is_played, played_at",
-    ),
-]);
+        supabase
+          .from("setlist_items")
+          .select(
+            "id, song_id, assigned_song_id, is_played, played_at",
+          ),
+      ]);
 
       if (votesResponse.error) {
         console.error(
@@ -91,7 +92,7 @@ export default function AdminPage() {
         return;
       }
 
-      
+
 
       if (currentSongResponse.error) {
         console.error(
@@ -108,7 +109,7 @@ export default function AdminPage() {
         return;
       }
 
-      
+
       if (setlistItemsResponse.error) {
         console.error(
           "Fehler beim Laden der Setlist-Einträge:",
@@ -338,32 +339,48 @@ export default function AdminPage() {
   }
 
   async function undoPlayed(songId: number) {
-  setChangingSongId(songId);
-  setErrorMessage("");
+    setChangingSongId(songId);
+    setErrorMessage("");
 
-  try {
-    const song = results.find(
-      (result) => result.songId === songId,
-    );
-
-    if (!song?.setlistItemId) {
-      setErrorMessage(
-        "Der passende Setlist-Eintrag konnte nicht gefunden werden.",
+    try {
+      const song = results.find(
+        (result) => result.songId === songId,
       );
 
+      if (!song?.setlistItemId) {
+        setErrorMessage(
+          "Der passende Setlist-Eintrag konnte nicht gefunden werden.",
+        );
+
+        setChangingSongId(null);
+        return;
+      }
+
+      const { error } = await supabase
+        .from("setlist_items")
+        .update({
+          is_played: false,
+          played_at: null,
+        })
+        .eq("id", song.setlistItemId);
+
+      if (error) {
+        console.error(
+          "Fehler beim Rückgängigmachen:",
+          error,
+        );
+
+        setErrorMessage(
+          "Der Gespielt-Status konnte nicht rückgängig gemacht werden.",
+        );
+
+        setChangingSongId(null);
+        return;
+      }
+
+      await loadVotes();
       setChangingSongId(null);
-      return;
-    }
-
-    const { error } = await supabase
-      .from("setlist_items")
-      .update({
-        is_played: false,
-        played_at: null,
-      })
-      .eq("id", song.setlistItemId);
-
-    if (error) {
+    } catch (error) {
       console.error(
         "Fehler beim Rückgängigmachen:",
         error,
@@ -374,24 +391,8 @@ export default function AdminPage() {
       );
 
       setChangingSongId(null);
-      return;
     }
-
-    await loadVotes();
-    setChangingSongId(null);
-  } catch (error) {
-    console.error(
-      "Fehler beim Rückgängigmachen:",
-      error,
-    );
-
-    setErrorMessage(
-      "Der Gespielt-Status konnte nicht rückgängig gemacht werden.",
-    );
-
-    setChangingSongId(null);
   }
-}
 
   async function setCurrentSong(song: VoteResult) {
     setChangingSongId(song.songId);
@@ -766,7 +767,7 @@ export default function AdminPage() {
           </article>
         </section>
 
-        {errorMessage && (
+                {errorMessage && (
           <div className="mt-6 rounded-2xl border border-red-500/40 bg-red-950/40 px-5 py-4 text-red-200">
             {errorMessage}
           </div>

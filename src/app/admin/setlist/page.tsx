@@ -27,10 +27,14 @@ type Song = {
 };
 
 type SetlistItem = {
-    id: number;
+    id: number;               // Song-ID
+    setlistItemId: number;    // ID aus setlist_items
+
     title: string;
     artist: string;
+
     itemType: "song" | "request";
+
     requestNumber?: number;
 };
 
@@ -41,6 +45,10 @@ export default function SetlistPage() {
     const [songs, setSongs] = useState<Song[]>([]);
     const [setlist, setSetlist] = useState<SetlistItem[]>([]);
     const [loading, setLoading] = useState(true);
+
+    const [songsWithPdf, setSongsWithPdf] = useState<Set<number>>(
+        new Set(),
+    );
 
     useEffect(() => {
         loadSongs();
@@ -63,9 +71,19 @@ export default function SetlistPage() {
         setLoading(false);
     }
     async function loadSetlist() {
-    const { data, error } = await supabase
-        .from("setlist_items")
-        .select(`
+        const {
+            data: { user },
+        } = await supabase.auth.getUser();
+
+        if (!user) {
+            console.error("Kein Benutzer angemeldet.");
+            return;
+        }
+
+        const [setlistResponse, pdfsResponse] = await Promise.all([
+            supabase
+                .from("setlist_items")
+                .select(`
             id,
             item_type,
             request_number,
@@ -82,46 +100,79 @@ export default function SetlistPage() {
                 artist
             )
         `)
-        .order("position");
+                .order("position"),
 
-    if (error) {
-        console.error("Fehler beim Laden der Setlist:", error);
-        return;
-    }
+            supabase
+                .from("song_pdfs")
+                .select("song_id")
+                .eq("user_id", user.id),
+        ]);
 
-    const loadedItems: SetlistItem[] =
-        data?.map((item: any) => {
-            if (item.item_type === "song") {
-                return {
-                    id: item.song.id,
-                    title: item.song.title,
-                    artist: item.song.artist,
-                    itemType: "song",
-                };
-            }
+        if (setlistResponse.error) {
+            console.error(
+                "Fehler beim Laden der Setlist:",
+                setlistResponse.error,
+            );
+            return;
+        }
 
-            if (item.assignedSong) {
+        if (pdfsResponse.error) {
+            console.error(
+                "Fehler beim Laden der PDFs:",
+                pdfsResponse.error,
+            );
+            return;
+        }
+
+        const data = setlistResponse.data;
+
+        setSongsWithPdf(
+            new Set(
+                (pdfsResponse.data ?? []).map(
+                    (pdf) => pdf.song_id,
+                ),
+            ),
+        );
+
+        const loadedItems: SetlistItem[] =
+            data?.map((item: any) => {
+                if (item.item_type === "song") {
+                    return {
+                        id: item.song.id,
+                        setlistItemId: item.id,
+                        title: item.song.title,
+                        artist: item.song.artist,
+                        itemType: "song",
+                    };
+                }
+
+                if (item.assignedSong) {
+                    return {
+                        id: item.assignedSong.id,
+                        setlistItemId: item.id,
+                        title: item.assignedSong.title,
+                        artist: item.assignedSong.artist,
+                        itemType: "request",
+                        requestNumber: item.request_number,
+                    };
+                }
+
                 return {
                     id: -item.request_number,
-                    title: item.assignedSong.title,
-                    artist: item.assignedSong.artist,
+                    setlistItemId: item.id,
+                    title: `Wunschsong ${item.request_number}`,
+                    artist:
+                        "Publikumswunsch – wird während des Konzerts gefüllt",
                     itemType: "request",
                     requestNumber: item.request_number,
                 };
-            }
+            }) ?? [];
 
-            return {
-                id: -item.request_number,
-                title: `Wunschsong ${item.request_number}`,
-                artist:
-                    "Publikumswunsch – wird während des Konzerts gefüllt",
-                itemType: "request",
-                requestNumber: item.request_number,
-            };
-        }) ?? [];
-
-    setSetlist(loadedItems);
-}
+        setSetlist(loadedItems);
+    }
+    function openPdf(songId: number) {
+        window.location.href = `/admin/pdf/${songId}`;
+    }
 
     async function addSong(song: Song) {
         const songIsAlreadyInSetlist = setlist.some(
@@ -225,104 +276,104 @@ export default function SetlistPage() {
     }
 
     async function removeSong(itemId: number) {
-    const isRequest = itemId < 0;
+        const isRequest = itemId < 0;
 
-    let deleteQuery = supabase
-        .from("setlist_items")
-        .delete();
+        let deleteQuery = supabase
+            .from("setlist_items")
+            .delete();
 
-    if (isRequest) {
-        deleteQuery = deleteQuery
-            .eq("item_type", "request")
-            .eq("request_number", Math.abs(itemId));
-    } else {
-        deleteQuery = deleteQuery
-            .eq("item_type", "song")
-            .eq("song_id", itemId);
-    }
-
-    const { error: deleteError } = await deleteQuery;
-
-    if (deleteError) {
-        console.error("Fehler beim Löschen:", {
-            message: deleteError.message,
-            code: deleteError.code,
-            details: deleteError.details,
-            hint: deleteError.hint,
-        });
-        return;
-    }
-
-    // Nach dem Löschen eines Wunschsongs:
-    // übrige Wunschsongs lückenlos neu nummerieren
-    if (isRequest) {
-        const { data: remainingRequests, error: loadError } =
-            await supabase
-                .from("setlist_items")
-                .select("id")
+        if (isRequest) {
+            deleteQuery = deleteQuery
                 .eq("item_type", "request")
-                .order("position");
+                .eq("request_number", Math.abs(itemId));
+        } else {
+            deleteQuery = deleteQuery
+                .eq("item_type", "song")
+                .eq("song_id", itemId);
+        }
 
-        if (loadError) {
-            console.error(
-                "Fehler beim Laden der übrigen Wunschsongs:",
-                loadError,
-            );
+        const { error: deleteError } = await deleteQuery;
+
+        if (deleteError) {
+            console.error("Fehler beim Löschen:", {
+                message: deleteError.message,
+                code: deleteError.code,
+                details: deleteError.details,
+                hint: deleteError.hint,
+            });
             return;
         }
 
-        // Zuerst vorübergehend sehr hohe Nummern vergeben,
-        // damit die Unique-Regel keine Konflikte verursacht
-        for (
-            let index = 0;
-            index < (remainingRequests?.length ?? 0);
-            index++
-        ) {
-            const request = remainingRequests![index];
+        // Nach dem Löschen eines Wunschsongs:
+        // übrige Wunschsongs lückenlos neu nummerieren
+        if (isRequest) {
+            const { data: remainingRequests, error: loadError } =
+                await supabase
+                    .from("setlist_items")
+                    .select("id")
+                    .eq("item_type", "request")
+                    .order("position");
 
-            const { error } = await supabase
-                .from("setlist_items")
-                .update({
-                    request_number: 1000000 + index,
-                })
-                .eq("id", request.id);
-
-            if (error) {
+            if (loadError) {
                 console.error(
-                    "Fehler bei der Zwischennummerierung:",
-                    error,
+                    "Fehler beim Laden der übrigen Wunschsongs:",
+                    loadError,
                 );
                 return;
             }
-        }
 
-        // Danach endgültig Wunschsong 1, 2, 3 ... vergeben
-        for (
-            let index = 0;
-            index < (remainingRequests?.length ?? 0);
-            index++
-        ) {
-            const request = remainingRequests![index];
+            // Zuerst vorübergehend sehr hohe Nummern vergeben,
+            // damit die Unique-Regel keine Konflikte verursacht
+            for (
+                let index = 0;
+                index < (remainingRequests?.length ?? 0);
+                index++
+            ) {
+                const request = remainingRequests![index];
 
-            const { error } = await supabase
-                .from("setlist_items")
-                .update({
-                    request_number: index + 1,
-                })
-                .eq("id", request.id);
+                const { error } = await supabase
+                    .from("setlist_items")
+                    .update({
+                        request_number: 1000000 + index,
+                    })
+                    .eq("id", request.id);
 
-            if (error) {
-                console.error(
-                    "Fehler bei der neuen Nummerierung:",
-                    error,
-                );
-                return;
+                if (error) {
+                    console.error(
+                        "Fehler bei der Zwischennummerierung:",
+                        error,
+                    );
+                    return;
+                }
+            }
+
+            // Danach endgültig Wunschsong 1, 2, 3 ... vergeben
+            for (
+                let index = 0;
+                index < (remainingRequests?.length ?? 0);
+                index++
+            ) {
+                const request = remainingRequests![index];
+
+                const { error } = await supabase
+                    .from("setlist_items")
+                    .update({
+                        request_number: index + 1,
+                    })
+                    .eq("id", request.id);
+
+                if (error) {
+                    console.error(
+                        "Fehler bei der neuen Nummerierung:",
+                        error,
+                    );
+                    return;
+                }
             }
         }
+
+        await loadSetlist();
     }
-
-    await loadSetlist();
-}
 
     async function saveNewOrder(songs: Song[]) {
         // Erster Durchgang:
@@ -446,54 +497,55 @@ export default function SetlistPage() {
                         ) : (
                             <div className="space-y-3">
                                 {setlist.map((song, index) => (
-    <article
-        key={song.id}
-        className={`flex items-center gap-4 rounded-2xl border p-4 shadow-lg ${
-            song.itemType === "request"
-                ? "border-amber-500/60 bg-amber-500/10"
-                : "border-white/10 bg-zinc-900/80"
-        }`}
-    >
-        <div
-            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg font-black ${
-                song.itemType === "request"
-                    ? "bg-amber-500/20 text-amber-300"
-                    : "bg-zinc-800 text-zinc-400"
-            }`}
-        >
-            {index + 1}
-        </div>
+                                    <article
+                                        key={song.id}
+                                        className={`flex items-center gap-4 rounded-2xl border p-4 shadow-lg ${song.itemType === "request"
+                                            ? "border-amber-500/60 bg-amber-500/10"
+                                            : "border-white/10 bg-zinc-900/80"
+                                            }`}
+                                    >
+                                        <div
+                                            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg font-black ${song.itemType === "request"
+                                                ? "bg-amber-500/20 text-amber-300"
+                                                : "bg-zinc-800 text-zinc-400"
+                                                }`}
+                                        >
+                                            {index + 1}
+                                        </div>
 
-        <div className="min-w-0 flex-1">
-            <h3 className="break-words text-lg font-black leading-snug">
-                {song.title}
-            </h3>
+                                        <div className="min-w-0 flex-1">
+                                            <h3 className="break-words text-lg font-black leading-snug">
+                                                {song.title}
+                                            </h3>
 
-            <p
-                className={`mt-1 break-words text-sm ${
-                    song.itemType === "request"
-                        ? "text-amber-200"
-                        : "text-zinc-400"
-                }`}
-            >
-                {song.artist}
-            </p>
-        </div>
+                                            <p
+                                                className={`mt-1 break-words text-sm ${song.itemType === "request"
+                                                    ? "text-amber-200"
+                                                    : "text-zinc-400"
+                                                    }`}
+                                            >
+                                                {song.artist}
+                                            </p>
+                                        </div>
 
-        <button
-            type="button"
-            disabled
-            title="PDF-Funktion folgt später"
-            className={`shrink-0 cursor-not-allowed rounded-xl border px-4 py-3 ${
-                song.itemType === "request"
-                    ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
-                    : "border-white/10 bg-zinc-800 text-zinc-500"
-            }`}
-        >
-            📄
-        </button>
-    </article>
-))}
+                                        <button
+                                            type="button"
+                                            onClick={() => openPdf(song.id)}
+                                            disabled={!songsWithPdf.has(song.id)}
+                                            title={
+                                                songsWithPdf.has(song.id)
+                                                    ? "PDF öffnen"
+                                                    : "Keine PDF vorhanden"
+                                            }
+                                            className={`shrink-0 rounded-xl border px-4 py-3 transition ${songsWithPdf.has(song.id)
+                                                ? "border-green-500/50 bg-green-600 text-white hover:bg-green-500"
+                                                : "cursor-not-allowed border-white/10 bg-zinc-800 text-zinc-500 opacity-50"
+                                                }`}
+                                        >
+                                            📄
+                                        </button>
+                                    </article>
+                                ))}
                             </div>
                         )}
                     </section>

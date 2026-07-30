@@ -4,7 +4,13 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import AdminNavigation from "../../components/AdminNavigation";
-import { Pencil, Eye, EyeOff, Trash2 } from "lucide-react";
+import {
+    Pencil,
+    Eye,
+    EyeOff,
+    Trash2,
+    FileUp,
+} from "lucide-react";
 
 type Song = {
     id: number;
@@ -34,22 +40,76 @@ export default function AdminSongsPage() {
     const [isSavingEdit, setIsSavingEdit] = useState(false);
 
     const [deletingSongId, setDeletingSongId] = useState<number | null>(null);
+    const [uploadingPdfSongId, setUploadingPdfSongId] =
+        useState<number | null>(null);
+    const [songsWithPdf, setSongsWithPdf] = useState<Set<number>>(
+        new Set(),
+    );
 
     useEffect(() => {
         async function loadSongs() {
-            const { data, error } = await supabase
-                .from("songs")
-                .select("id, title, artist, is_active")
-                .order("title");
+            setErrorMessage("");
 
-            if (error) {
-                console.error("Fehler beim Laden der Songs:", error);
-                setErrorMessage("Die Songs konnten nicht geladen werden.");
+            const {
+                data: { user },
+            } = await supabase.auth.getUser();
+
+            if (!user) {
+                setErrorMessage("Du bist nicht angemeldet.");
                 setLoading(false);
                 return;
             }
 
-            setSongs(data ?? []);
+            const [songsResponse, pdfsResponse] = await Promise.all([
+                supabase
+                    .from("songs")
+                    .select("id, title, artist, is_active")
+                    .order("title"),
+
+                supabase
+                    .from("song_pdfs")
+                    .select("song_id")
+                    .eq("user_id", user.id),
+            ]);
+
+            if (songsResponse.error) {
+                console.error(
+                    "Fehler beim Laden der Songs:",
+                    songsResponse.error,
+                );
+
+                setErrorMessage(
+                    "Die Songs konnten nicht geladen werden.",
+                );
+
+                setLoading(false);
+                return;
+            }
+
+            if (pdfsResponse.error) {
+                console.error(
+                    "Fehler beim Laden der PDFs:",
+                    pdfsResponse.error,
+                );
+
+                setErrorMessage(
+                    "Der PDF-Status konnte nicht geladen werden.",
+                );
+
+                setLoading(false);
+                return;
+            }
+
+            setSongs(songsResponse.data ?? []);
+
+            setSongsWithPdf(
+                new Set(
+                    (pdfsResponse.data ?? []).map(
+                        (pdf) => pdf.song_id,
+                    ),
+                ),
+            );
+
             setLoading(false);
         }
 
@@ -76,6 +136,66 @@ export default function AdminSongsPage() {
         );
     });
 
+    async function uploadPdf(song: Song, file: File) {
+        setUploadingPdfSongId(song.id);
+
+        try {
+            const {
+                data: { user },
+            } = await supabase.auth.getUser();
+
+            if (!user) {
+                alert("Du bist nicht angemeldet.");
+                return;
+            }
+
+            const extension = file.name.split(".").pop() ?? "pdf";
+
+            const storagePath =
+                `${user.id}/${song.id}.${extension}`;
+
+            const { error: uploadError } = await supabase.storage
+                .from("song-pdfs")
+                .upload(storagePath, file, {
+                    upsert: true,
+                });
+
+            if (uploadError) {
+                console.error(uploadError);
+                alert("PDF konnte nicht hochgeladen werden.");
+                return;
+            }
+
+            const { error: databaseError } = await supabase
+                .from("song_pdfs")
+                .upsert(
+                    {
+                        song_id: song.id,
+                        user_id: user.id,
+                        storage_path: storagePath,
+                        file_name: file.name,
+                    },
+                    {
+                        onConflict: "song_id,user_id",
+                    },
+                );
+
+            if (databaseError) {
+                console.error(databaseError);
+                alert("PDF konnte nicht gespeichert werden.");
+                return;
+            }
+
+            setSongsWithPdf((current) => {
+    const updated = new Set(current);
+    updated.add(song.id);
+    return updated;
+});
+            alert("PDF erfolgreich gespeichert.");
+        } finally {
+            setUploadingPdfSongId(null);
+        }
+    }
     async function saveSong(id: number) {
         const updatedTitle = editTitle.trim();
         const updatedArtist = editArtist.trim();
@@ -314,7 +434,7 @@ export default function AdminSongsPage() {
                                                 )}
                                             </td>
 
-                                            
+
 
                                             <td className="px-5 py-4">
                                                 {song.is_active ? (
@@ -367,7 +487,42 @@ export default function AdminSongsPage() {
                                                             </button>
                                                         </>
                                                     ) : (
+
                                                         <>
+                                                            <>
+                                                                <input
+                                                                    id={`pdf-upload-${song.id}`}
+                                                                    type="file"
+                                                                    accept="application/pdf"
+                                                                    className="hidden"
+                                                                    onChange={(event) => {
+                                                                        const file = event.target.files?.[0];
+
+                                                                        if (file) {
+                                                                            uploadPdf(song, file);
+                                                                        }
+
+                                                                        event.target.value = "";
+                                                                    }}
+                                                                />
+
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() =>
+                                                                        document
+                                                                            .getElementById(`pdf-upload-${song.id}`)
+                                                                            ?.click()
+                                                                    }
+                                                                    disabled={uploadingPdfSongId === song.id}
+                                                                    className={`rounded-xl p-2 text-white transition disabled:opacity-50 ${songsWithPdf.has(song.id)
+                                                                            ? "bg-green-600 hover:bg-green-500"
+                                                                            : "bg-red-600 hover:bg-red-500"
+                                                                        }`}
+                                                                    title="PDF hochladen oder ersetzen"
+                                                                >
+                                                                    <FileUp size={18} />
+                                                                </button>
+                                                            </>
                                                             <button
                                                                 type="button"
                                                                 onClick={() => {
