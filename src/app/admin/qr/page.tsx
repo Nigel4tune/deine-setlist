@@ -8,7 +8,7 @@ export default function QRPage() {
   const [voteUrl, setVoteUrl] = useState("");
 
   useEffect(() => {
-    setVoteUrl(`${window.location.origin}/vote`);
+    setVoteUrl(window.location.origin);
   }, []);
 
   return (
