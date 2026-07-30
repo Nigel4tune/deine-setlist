@@ -218,7 +218,7 @@ export default function SetlistPage() {
             return;
         }
 
-        setSetlist((currentSetlist) => [...currentSetlist, song]);
+        await loadSetlist();
     }
     async function addRequestPlaceholder() {
         const { data: lastPositionData, error: positionError } = await supabase
