@@ -375,7 +375,7 @@ export default function SetlistPage() {
         await loadSetlist();
     }
 
-    async function saveNewOrder(songs: Song[]) {
+    async function saveNewOrder(songs: SetlistItem[]) {
         // Erster Durchgang:
         // Vorübergehend eindeutige negative Positionen vergeben
         for (let index = 0; index < songs.length; index++) {
