@@ -37,18 +37,26 @@ export default function Home() {
         const concertId = await getActiveConcertId();
         const deviceId = getDeviceId();
 
-        const { count, error } = await supabase
-          .from("votes")
-          .select("*", { count: "exact", head: true })
-          .eq("concert_id", concertId)
-          .eq("device_id", deviceId);
+        const { data: alreadyVoted, error } = await supabase.rpc(
+          "has_device_voted",
+          {
+            p_concert_id: concertId,
+            p_device_id: deviceId,
+          },
+        );
 
         if (error) {
-          console.error("Fehler bei der Abstimmungsprüfung:", error);
+          console.error(
+            "Fehler beim Prüfen vorhandener Stimmen:",
+            error.message,
+            error.code,
+            error.details,
+            error.hint,
+          );
           return;
         }
 
-        setHasAlreadyVoted((count ?? 0) > 0);
+        setHasAlreadyVoted(Boolean(alreadyVoted));
       } catch {
         setHasAlreadyVoted(false);
       } finally {
@@ -170,49 +178,87 @@ export default function Home() {
     setIsSubmitting(true);
     setSubmitError("");
 
-    const concertId = await getActiveConcertId();
-    const deviceId = getDeviceId();
+    try {
+      const concertId = await getActiveConcertId();
+      const deviceId = getDeviceId();
 
-    const { count, error: countError } = await supabase
-      .from("votes")
-      .select("*", { count: "exact", head: true })
-      .eq("concert_id", concertId)
-      .eq("device_id", deviceId);
+      const {
+        data: alreadyVoted,
+        error: voteCheckError,
+      } = await supabase.rpc("has_device_voted", {
+        p_concert_id: concertId,
+        p_device_id: deviceId,
+      });
 
-    if (countError) {
-      console.error(countError);
-    }
+      if (voteCheckError) {
+        throw voteCheckError;
+      }
 
-    if ((count ?? 0) > 0) {
+      if (alreadyVoted) {
+        setHasAlreadyVoted(true);
+        setScreen("thanks");
+        return;
+      }
+
+      const votes = selectedSongs.map((song) => ({
+        concert_id: concertId,
+        device_id: deviceId,
+        song_id: song.id,
+        song_title: song.title,
+        artist: song.artist,
+      }));
+
+      const { error: insertError } = await supabase
+        .from("votes")
+        .insert(votes);
+
+      if (insertError) {
+        throw insertError;
+      }
+
+      // Verhindert auch ohne erneutes Laden der Seite
+      // eine weitere Abstimmung.
       setHasAlreadyVoted(true);
-      setIsSubmitting(false);
+      setSelectedSongIds([]);
       setScreen("thanks");
-      return;
-    }
+    } catch (error: unknown) {
+      let message = "Unbekannter Fehler";
 
-    const votes = selectedSongs.map((song) => ({
-      concert_id: concertId,
-      device_id: deviceId,
-      song_id: song.id,
-      song_title: song.title,
-      artist: song.artist,
-    }));
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "message" in error
+      ) {
+        message = String(error.message);
+      } else if (error instanceof Error) {
+        message = error.message;
+      }
 
-    const { error } = await supabase.from("votes").insert(votes);
-
-    if (error) {
-      console.error("Fehler beim Speichern:", error);
-
-      setSubmitError(
-        "Deine Wünsche konnten nicht gespeichert werden. Bitte versuche es noch einmal.",
+      console.error(
+        "Fehler beim Speichern der Stimmen:",
+        message,
       );
 
-      setIsSubmitting(false);
-      return;
-    }
+      const normalizedMessage = message.toLowerCase();
 
-    setIsSubmitting(false);
-    setScreen("thanks");
+      if (
+        normalizedMessage.includes("maximum of three") ||
+        normalizedMessage.includes("maximal drei") ||
+        normalizedMessage.includes("bereits abgestimmt")
+      ) {
+        setHasAlreadyVoted(true);
+        setScreen("thanks");
+        return;
+      }
+
+      setSubmitError(
+        normalizedMessage.includes("kein aktives konzert")
+          ? "Aktuell läuft kein Konzert. Die Abstimmung ist geschlossen."
+          : "Deine Wünsche konnten nicht gespeichert werden. Bitte versuche es noch einmal.",
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   if (isCheckingVote) {
@@ -233,6 +279,27 @@ export default function Home() {
 
           <h1 className="mt-6 text-3xl font-black sm:text-4xl">
             Du hast bereits abgestimmt!
+            <div className="mt-8 flex flex-col items-center gap-3">
+              <p className="text-sm text-zinc-500">Weitere Infos:</p>
+
+              <a
+                href="https://www.instagram.com/nofrontband/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 rounded-xl border border-pink-500/30 bg-pink-500/10 px-5 py-3 font-semibold text-pink-300 transition hover:border-pink-400 hover:bg-pink-500/20 hover:text-pink-200"
+                aria-label="No Front auf Instagram öffnen"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  className="h-6 w-6 fill-current"
+                >
+                  <path d="M7.75 2h8.5A5.76 5.76 0 0 1 22 7.75v8.5A5.76 5.76 0 0 1 16.25 22h-8.5A5.76 5.76 0 0 1 2 16.25v-8.5A5.76 5.76 0 0 1 7.75 2Zm0 2A3.75 3.75 0 0 0 4 7.75v8.5A3.75 3.75 0 0 0 7.75 20h8.5A3.75 3.75 0 0 0 20 16.25v-8.5A3.75 3.75 0 0 0 16.25 4h-8.5ZM17.5 5.5a1 1 0 1 1 0 2 1 1 0 0 1 0-2ZM12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z" />
+                </svg>
+
+                
+              </a>
+            </div>
           </h1>
 
           <p className="mt-4 text-zinc-300">
@@ -350,8 +417,8 @@ export default function Home() {
               <span
                 key={number}
                 className={`h-3 w-3 rounded-full ${selectedSongIds.length >= number
-                    ? "bg-red-500"
-                    : "bg-zinc-700"
+                  ? "bg-red-500"
+                  : "bg-zinc-700"
                   }`}
               />
             ))}
@@ -381,10 +448,10 @@ export default function Home() {
                 onClick={() => toggleSong(song.id)}
                 disabled={selectionIsFull || isSubmitting}
                 className={`flex w-full items-center justify-between rounded-2xl border px-5 py-4 text-left transition ${isSelected
-                    ? "border-red-500 bg-red-600/20"
-                    : selectionIsFull
-                      ? "cursor-not-allowed border-white/5 bg-zinc-900/40 text-zinc-600"
-                      : "border-white/10 bg-zinc-900 hover:border-white/30 hover:bg-zinc-800"
+                  ? "border-red-500 bg-red-600/20"
+                  : selectionIsFull
+                    ? "cursor-not-allowed border-white/5 bg-zinc-900/40 text-zinc-600"
+                    : "border-white/10 bg-zinc-900 hover:border-white/30 hover:bg-zinc-800"
                   }`}
               >
                 <span>
@@ -396,8 +463,8 @@ export default function Home() {
 
                 <span
                   className={`flex h-8 w-8 items-center justify-center rounded-full border font-bold ${isSelected
-                      ? "border-red-500 bg-red-500"
-                      : "border-zinc-600 text-transparent"
+                    ? "border-red-500 bg-red-500"
+                    : "border-zinc-600 text-transparent"
                     }`}
                 >
                   ✓
