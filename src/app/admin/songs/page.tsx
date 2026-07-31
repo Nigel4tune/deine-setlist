@@ -391,7 +391,7 @@ export default function AdminSongsPage() {
                                 <thead className="bg-zinc-800 text-left">
                                     <tr>
                                         <th className="px-5 py-4">Song</th>
-                                        <th className="px-5 py-4">Status</th>
+                                        <th className="px-5 py-4">Vote</th>
                                         <th className="px-5 py-4 text-right">
                                             Aktionen
                                         </th>
@@ -440,13 +440,12 @@ export default function AdminSongsPage() {
                                                 {song.is_active ? (
                                                     <span className="flex items-center gap-2 font-bold text-green-500">
                                                         <span className="h-3 w-3 rounded-full bg-green-500" />
-                                                        In Setlist
-
+                                                        ON
                                                     </span>
                                                 ) : (
                                                     <span className="flex items-center gap-2 font-bold text-zinc-400">
                                                         <span className="h-3 w-3 rounded-full bg-red-500" />
-                                                        Ausgeblendet
+                                                        OFF
                                                     </span>
                                                 )}
                                             </td>

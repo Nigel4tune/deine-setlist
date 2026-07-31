@@ -44,7 +44,47 @@ export default function AdminPage() {
     useState("");
 
   const [isStartingConcert, setIsStartingConcert] =
-  useState(false);  
+    useState(false);
+  const [isConcertActive, setIsConcertActive] =
+    useState<boolean | null>(null);
+
+  const [isEndingConcert, setIsEndingConcert] =
+    useState(false);
+
+  const checkConcertStatus = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("concerts")
+      .select("id")
+      .eq("is_active", true)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error(
+        "Konzertstatus konnte nicht geladen werden:",
+        error,
+      );
+
+      setIsConcertActive(false);
+      return;
+    }
+
+    setIsConcertActive(Boolean(data));
+  }, []);
+
+  useEffect(() => {
+    void checkConcertStatus();
+
+    const statusInterval = window.setInterval(() => {
+      void checkConcertStatus();
+    }, 5000);
+
+    return () => {
+      window.clearInterval(statusInterval);
+    };
+  }, [checkConcertStatus]);
 
 
   const loadVotes = useCallback(async (showLoading = false) => {
@@ -212,6 +252,7 @@ export default function AdminPage() {
       setLoading(false);
       setIsRefreshing(false);
     } catch {
+      setIsConcertActive(false);
       setResults([]);
       setCurrentSongId(null);
       setLastUpdated(null);
@@ -540,117 +581,111 @@ export default function AdminPage() {
   }
 
   async function startNewConcert() {
-  const concertName = newConcertName.trim();
+    const concertName = newConcertName.trim();
 
-  if (!concertName) {
-    alert("Bitte gib einen Konzertnamen ein.");
-    return;
-  }
-
-  if (isStartingConcert) {
-    return;
-  }
-
-  setErrorMessage("");
-  setIsStartingConcert(true);
-
-  try {
-    const { data: previousConcerts, error: loadError } =
-      await supabase
-        .from("concerts")
-        .select("id")
-        .eq("is_active", true);
-
-    if (loadError) {
-      console.error(
-        "Aktives Konzert konnte nicht geladen werden:",
-        loadError.message,
-      );
-
-      setErrorMessage(
-        `Das aktive Konzert konnte nicht geladen werden: ${loadError.message}`,
-      );
-
+    if (!concertName) {
+      alert("Bitte gib einen Konzertnamen ein.");
       return;
     }
 
-    const previousConcertIds = (previousConcerts ?? []).map(
-      (concert) => concert.id,
-    );
-
-    const { error: deactivateError } = await supabase
-      .from("concerts")
-      .update({ is_active: false })
-      .eq("is_active", true);
-
-    if (deactivateError) {
-      console.error(
-        "Altes Konzert konnte nicht beendet werden:",
-        deactivateError.message,
-      );
-
-      setErrorMessage(
-        `Das bisherige Konzert konnte nicht beendet werden: ${deactivateError.message}`,
-      );
-
+    if (isStartingConcert) {
       return;
     }
 
-    const { data: newConcert, error: createError } =
-      await supabase
+    setErrorMessage("");
+    setIsStartingConcert(true);
+
+    try {
+      // Sicherheitshalber prüfen, ob bereits ein Konzert aktiv ist.
+      const {
+        data: existingConcert,
+        error: existingConcertError,
+      } = await supabase
         .from("concerts")
-        .insert({
-          name: concertName,
-          is_active: true,
-        })
         .select("id")
-        .single();
+        .eq("is_active", true)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    if (createError || !newConcert) {
-      console.error(
-        "Neues Konzert konnte nicht erstellt werden:",
-        createError?.message,
-        createError?.code,
-        createError?.details,
-        createError?.hint,
-      );
+      if (existingConcertError) {
+        console.error(
+          "Konzertstatus konnte nicht geprüft werden:",
+          existingConcertError,
+        );
 
-      if (previousConcertIds.length > 0) {
-        await supabase
-          .from("concerts")
-          .update({ is_active: true })
-          .in("id", previousConcertIds);
+        setErrorMessage(
+          `Der Konzertstatus konnte nicht geprüft werden: ${existingConcertError.message}`,
+        );
+
+        return;
       }
 
-      setErrorMessage(
-        createError?.message
-          ? `Das neue Konzert konnte nicht erstellt werden: ${createError.message}`
-          : "Das neue Konzert konnte nicht erstellt werden.",
+      if (existingConcert) {
+        setIsConcertActive(true);
+        setShowNewConcertDialog(false);
+
+        setErrorMessage(
+          "Es läuft bereits ein Konzert. Beende es zuerst.",
+        );
+
+        return;
+      }
+
+      // Weil kein anderes Konzert aktiv ist, kann das neue
+      // Konzert sofort aktiv angelegt werden.
+      const { data: newConcert, error: createError } =
+        await supabase
+          .from("concerts")
+          .insert({
+            name: concertName,
+            is_active: true,
+          })
+          .select("id")
+          .single();
+
+      if (createError || !newConcert) {
+        console.error(
+          "Neues Konzert konnte nicht erstellt werden:",
+          createError?.message,
+          createError?.code,
+          createError?.details,
+          createError?.hint,
+        );
+
+        setErrorMessage(
+          createError?.message
+            ? `Das Konzert konnte nicht gestartet werden: ${createError.message}`
+            : "Das Konzert konnte nicht gestartet werden.",
+        );
+
+        return;
+      }
+
+      setIsConcertActive(true);
+      setShowNewConcertDialog(false);
+      setNewConcertName("");
+      setCurrentSongId(null);
+      setResults([]);
+
+      await checkConcertStatus();
+      await loadVotes(true);
+    } catch (error) {
+      console.error(
+        "Fehler beim Starten des Konzerts:",
+        error,
       );
 
-      return;
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Beim Starten des Konzerts ist ein Fehler aufgetreten.",
+      );
+    } finally {
+      setIsStartingConcert(false);
     }
-
-    setShowNewConcertDialog(false);
-    setNewConcertName("");
-    setCurrentSongId(null);
-
-    await loadVotes(true);
-  } catch (error) {
-    console.error(
-      "Unerwarteter Fehler beim Starten des Konzerts:",
-      error,
-    );
-
-    setErrorMessage(
-      error instanceof Error
-        ? `Fehler beim Starten des Konzerts: ${error.message}`
-        : "Beim Starten des Konzerts ist ein unbekannter Fehler aufgetreten.",
-    );
-  } finally {
-    setIsStartingConcert(false);
   }
-}
 
   function getPositionLabel(index: number) {
     if (index === 0) {
@@ -669,6 +704,10 @@ export default function AdminPage() {
   }
 
   async function endConcert() {
+    if (isEndingConcert) {
+      return;
+    }
+
     const confirmed = window.confirm(
       "Möchtest du das aktuelle Konzert wirklich beenden?",
     );
@@ -677,53 +716,108 @@ export default function AdminPage() {
       return;
     }
 
-    const { data: activeConcert, error: concertError } = await supabase
-      .from("concerts")
-      .select("id")
-      .eq("is_active", true)
-      .maybeSingle();
+    setErrorMessage("");
+    setIsEndingConcert(true);
 
-    if (concertError) {
+    try {
+      const { data: activeConcert, error: concertError } =
+        await supabase
+          .from("concerts")
+          .select("id")
+          .eq("is_active", true)
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+      if (concertError) {
+        console.error(
+          "Aktives Konzert konnte nicht geladen werden:",
+          concertError,
+        );
+
+        setErrorMessage(
+          `Das aktive Konzert konnte nicht geladen werden: ${concertError.message}`,
+        );
+
+        return;
+      }
+
+      if (!activeConcert) {
+        setIsConcertActive(false);
+        setErrorMessage("Es gibt aktuell kein aktives Konzert.");
+        return;
+      }
+
+      const { error: currentSongError } = await supabase
+        .from("current_song")
+        .delete()
+        .eq("concert_id", activeConcert.id);
+
+      if (currentSongError) {
+        console.error(
+          "Aktueller Song konnte nicht entfernt werden:",
+          currentSongError,
+        );
+
+        setErrorMessage(
+          `Der aktuelle Song konnte nicht entfernt werden: ${currentSongError.message}`,
+        );
+
+        return;
+      }
+
+      const {
+        data: endedConcertId,
+        error: updateError,
+      } = await supabase.rpc("end_active_concert");
+
+      if (updateError) {
+        console.error(
+          "Konzert konnte nicht beendet werden:",
+          updateError.message,
+          updateError.code,
+          updateError.details,
+          updateError.hint,
+        );
+
+        setErrorMessage(
+          `Das Konzert konnte nicht beendet werden: ${updateError.message}`,
+        );
+
+        return;
+      }
+
+      if (endedConcertId === null) {
+        setIsConcertActive(false);
+        setErrorMessage(
+          "Es wurde kein aktives Konzert gefunden.",
+        );
+
+        return;
+      }
+      setIsConcertActive(false);
+      setResults([]);
+      setCurrentSongId(null);
+      setLastUpdated(null);
+
+      await checkConcertStatus();
+
+      alert("Das Konzert wurde beendet.");
+    } catch (error) {
       console.error(
-        "Aktives Konzert konnte nicht geladen werden:",
-        concertError.message,
+        "Fehler beim Beenden des Konzerts:",
+        error,
       );
-      return;
-    }
 
-    if (!activeConcert) {
-      alert("Es gibt aktuell kein aktives Konzert.");
-      return;
-    }
-
-    const { error: currentSongError } = await supabase
-      .from("current_song")
-      .delete()
-      .eq("concert_id", activeConcert.id);
-
-    if (currentSongError) {
-      console.error(
-        "Aktueller Song konnte nicht entfernt werden:",
-        currentSongError.message,
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Beim Beenden des Konzerts ist ein Fehler aufgetreten.",
       );
-      return;
+    } finally {
+      setIsEndingConcert(false);
     }
-
-    const { error: updateError } = await supabase
-      .from("concerts")
-      .update({ is_active: false })
-      .eq("id", activeConcert.id);
-
-    if (updateError) {
-      console.error(
-        "Konzert konnte nicht beendet werden:",
-        updateError.message,
-      );
-      return;
-    }
-
-    alert("Das Konzert wurde beendet.");
-    window.location.reload();
   }
 
   return (
@@ -748,21 +842,35 @@ export default function AdminPage() {
           </div>
 
           <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={() => setShowNewConcertDialog(true)}
-              className="rounded-2xl bg-green-600 px-6 py-4 font-black transition hover:bg-green-500"
-            >
-              ➕ Neues Konzert
-            </button>
-
-            <button
-              onClick={endConcert}
-              className="rounded-2xl bg-orange-600 px-6 py-5 text-xl font-bold text-white transition hover:bg-orange-500"
-            >
-              Konzert beenden
-            </button>
-
+            {isConcertActive === null ? (
+              <button
+                type="button"
+                disabled
+                className="rounded-2xl bg-zinc-700 px-6 py-4 font-black text-zinc-400"
+              >
+                Konzertstatus wird geladen …
+              </button>
+            ) : isConcertActive ? (
+              <button
+                type="button"
+                onClick={endConcert}
+                disabled={isEndingConcert}
+                className="rounded-2xl bg-orange-600 px-6 py-4 font-black text-white transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isEndingConcert
+                  ? "Konzert wird beendet …"
+                  : "■ Konzert beenden"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowNewConcertDialog(true)}
+                disabled={isStartingConcert}
+                className="rounded-2xl bg-green-600 px-6 py-4 font-black text-white transition hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                ▶ Konzert starten
+              </button>
+            )}
           </div>
         </header>
 
@@ -814,7 +922,7 @@ export default function AdminPage() {
           </article>
         </section>
 
-                {errorMessage && (
+        {errorMessage && (
           <div className="mt-6 rounded-2xl border border-red-500/40 bg-red-950/40 px-5 py-4 text-red-200">
             {errorMessage}
           </div>
@@ -1034,7 +1142,7 @@ export default function AdminPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
           <div className="w-full max-w-md rounded-3xl bg-zinc-900 p-6">
             <h2 className="text-2xl font-black">
-              Neues Konzert
+              Konzert starten
             </h2>
 
             <input

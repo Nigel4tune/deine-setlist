@@ -30,79 +30,118 @@ export default function Home() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [hasAlreadyVoted, setHasAlreadyVoted] = useState(false);
-const [isCheckingVote, setIsCheckingVote] = useState(true);
-useEffect(() => {
-  async function checkExistingVote() {
-    try {
-      const concertId = await getActiveConcertId();
-      const deviceId = getDeviceId();
+  const [isCheckingVote, setIsCheckingVote] = useState(true);
+  useEffect(() => {
+    async function checkExistingVote() {
+      try {
+        const concertId = await getActiveConcertId();
+        const deviceId = getDeviceId();
 
-      const { count, error } = await supabase
-        .from("votes")
-        .select("*", { count: "exact", head: true })
-        .eq("concert_id", concertId)
-        .eq("device_id", deviceId);
+        const { count, error } = await supabase
+          .from("votes")
+          .select("*", { count: "exact", head: true })
+          .eq("concert_id", concertId)
+          .eq("device_id", deviceId);
 
-      if (error) {
-        console.error("Fehler bei der Abstimmungsprüfung:", error);
+        if (error) {
+          console.error("Fehler bei der Abstimmungsprüfung:", error);
+          return;
+        }
+
+        setHasAlreadyVoted((count ?? 0) > 0);
+      } catch {
+        setHasAlreadyVoted(false);
+      } finally {
+        setIsCheckingVote(false);
+      }
+    }
+
+    checkExistingVote();
+  }, []);
+
+  useEffect(() => {
+    async function loadAvailableSongs() {
+      const [songsResponse, setlistResponse] = await Promise.all([
+        supabase
+          .from("songs")
+          .select("id, title, artist")
+          .eq("is_active", true)
+          .order("title"),
+
+        supabase
+          .from("setlist_items")
+          .select("song_id, assigned_song_id"),
+      ]);
+
+      if (songsResponse.error) {
+        console.error(
+          "Fehler beim Laden der Songs:",
+          songsResponse.error,
+        );
         return;
       }
 
-      setHasAlreadyVoted((count ?? 0) > 0);
-    } catch {
-      setHasAlreadyVoted(false);
-    } finally {
-      setIsCheckingVote(false);
+      if (setlistResponse.error) {
+        console.error(
+          "Fehler beim Laden der Setlist:",
+          setlistResponse.error,
+        );
+        return;
+      }
+
+      const songIdsInSetlist = new Set<number>();
+
+      for (const item of setlistResponse.data ?? []) {
+        if (typeof item.song_id === "number") {
+          songIdsInSetlist.add(item.song_id);
+        }
+
+        if (typeof item.assigned_song_id === "number") {
+          songIdsInSetlist.add(item.assigned_song_id);
+        }
+      }
+
+      const availableSongs = (songsResponse.data ?? []).filter(
+        (song) => !songIdsInSetlist.has(song.id),
+      );
+
+      setSongs(availableSongs);
+
+      setSelectedSongIds((currentSelection) =>
+        currentSelection.filter((songId) =>
+          availableSongs.some((song) => song.id === songId),
+        ),
+      );
     }
-  }
 
-  checkExistingVote();
-}, []);
+    void loadAvailableSongs();
+  }, []);
 
-useEffect(() => {
-  async function loadSongs() {
-    const { data, error } = await supabase
-      .from("songs")
-      .select("id, title, artist")
-      .eq("is_active", true)
-      .order("title");
+  const filteredSongs = useMemo(() => {
+    const normalizedQuery = normalizeSearchText(searchTerm);
 
-    if (error) {
-      console.error("Fehler beim Laden der Songs:", error);
-      return;
+    if (!normalizedQuery) {
+      return songs;
     }
 
-    setSongs(data ?? []);
-  }
+    return songs.filter((song) => {
+      const normalizedTitle = normalizeSearchText(song.title);
+      const normalizedArtist = normalizeSearchText(song.artist);
+      const normalizedCombined = normalizeSearchText(
+        `${song.title} ${song.artist}`
+      );
 
-  loadSongs();
-}, []);
-
-const filteredSongs = useMemo(() => {
-  const normalizedQuery = normalizeSearchText(searchTerm);
-
-  if (!normalizedQuery) {
-    return songs;
-  }
-
-  return songs.filter((song) => {
-    const normalizedTitle = normalizeSearchText(song.title);
-    const normalizedArtist = normalizeSearchText(song.artist);
-    const normalizedCombined = normalizeSearchText(
-      `${song.title} ${song.artist}`
-    );
-
-    return (
-      normalizedTitle.includes(normalizedQuery) ||
-      normalizedArtist.includes(normalizedQuery) ||
-      normalizedCombined.includes(normalizedQuery)
-    );
-  });
-}, [songs, searchTerm]);
+      return (
+        normalizedTitle.includes(normalizedQuery) ||
+        normalizedArtist.includes(normalizedQuery) ||
+        normalizedCombined.includes(normalizedQuery)
+      );
+    });
+  }, [songs, searchTerm]);
 
   const selectedSongs = useMemo(() => {
-  return songs.filter((song) => selectedSongIds.includes(song.id));
-}, [songs, selectedSongIds]);
+    return songs.filter((song) => selectedSongIds.includes(song.id));
+  }, [songs, selectedSongIds]);
 
   function toggleSong(songId: number) {
     setSubmitError("");
@@ -125,8 +164,8 @@ const filteredSongs = useMemo(() => {
 
   async function submitVotes() {
     if (selectedSongs.length !== 3 || isSubmitting) {
-  return;
-}
+      return;
+    }
 
     setIsSubmitting(true);
     setSubmitError("");
@@ -134,74 +173,75 @@ const filteredSongs = useMemo(() => {
     const concertId = await getActiveConcertId();
     const deviceId = getDeviceId();
 
-const { count, error: countError } = await supabase
-  .from("votes")
-  .select("*", { count: "exact", head: true })
-  .eq("concert_id", concertId)
-  .eq("device_id", deviceId);
+    const { count, error: countError } = await supabase
+      .from("votes")
+      .select("*", { count: "exact", head: true })
+      .eq("concert_id", concertId)
+      .eq("device_id", deviceId);
 
-if (countError) {
-  console.error(countError);
-}
+    if (countError) {
+      console.error(countError);
+    }
 
-if ((count ?? 0) > 0) {
-  setHasAlreadyVoted(true);
-  setIsSubmitting(false);
-  return;
-}
+    if ((count ?? 0) > 0) {
+      setHasAlreadyVoted(true);
+      setIsSubmitting(false);
+      setScreen("thanks");
+      return;
+    }
 
-const votes = selectedSongs.map((song) => ({
-  concert_id: concertId,
-  device_id: deviceId,
-  song_id: song.id,
-  song_title: song.title,
-  artist: song.artist,
-}));
+    const votes = selectedSongs.map((song) => ({
+      concert_id: concertId,
+      device_id: deviceId,
+      song_id: song.id,
+      song_title: song.title,
+      artist: song.artist,
+    }));
 
-const { error } = await supabase.from("votes").insert(votes);
+    const { error } = await supabase.from("votes").insert(votes);
 
     if (error) {
-  console.error("Fehler beim Speichern:", error);
+      console.error("Fehler beim Speichern:", error);
 
-  setSubmitError(
-    "Deine Wünsche konnten nicht gespeichert werden. Bitte versuche es noch einmal.",
-  );
+      setSubmitError(
+        "Deine Wünsche konnten nicht gespeichert werden. Bitte versuche es noch einmal.",
+      );
 
-  setIsSubmitting(false);
-  return;
-}
+      setIsSubmitting(false);
+      return;
+    }
 
     setIsSubmitting(false);
     setScreen("thanks");
   }
 
   if (isCheckingVote) {
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 text-white">
-      <p className="text-zinc-400">Abstimmung wird geladen...</p>
-    </main>
-  );
-}
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 text-white">
+        <p className="text-zinc-400">Abstimmung wird geladen...</p>
+      </main>
+    );
+  }
 
-if (hasAlreadyVoted) {
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 text-white">
-      <section className="w-full max-w-xl rounded-3xl border border-green-500/30 bg-green-950/20 p-8 text-center shadow-2xl">
-        <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green-500 text-4xl font-black">
-          ✓
-        </div>
+  if (hasAlreadyVoted && screen !== "thanks") {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 text-white">
+        <section className="w-full max-w-xl rounded-3xl border border-green-500/30 bg-green-950/20 p-8 text-center shadow-2xl">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green-500 text-4xl font-black">
+            ✓
+          </div>
 
-        <h1 className="mt-6 text-3xl font-black sm:text-4xl">
-          Du hast bereits abgestimmt!
-        </h1>
+          <h1 className="mt-6 text-3xl font-black sm:text-4xl">
+            Du hast bereits abgestimmt!
+          </h1>
 
-        <p className="mt-4 text-zinc-300">
-          Vielen Dank. Deine drei Wünsche wurden gespeichert.
-        </p>
-      </section>
-    </main>
-  );
-}
+          <p className="mt-4 text-zinc-300">
+            Vielen Dank. Deine drei Wünsche wurden gespeichert.
+          </p>
+        </section>
+      </main>
+    );
+  }
   if (screen === "landing") {
     return (
       <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 text-white">
@@ -223,8 +263,8 @@ if (hasAlreadyVoted) {
           </p>
 
           <p className="mt-3 text-zinc-500">
-  Wähle drei deiner Favoriten.
-</p>
+            Wähle drei deiner Favoriten.
+          </p>
 
           <button
             type="button"
@@ -293,8 +333,8 @@ if (hasAlreadyVoted) {
           </h1>
 
           <p className="mt-4 text-zinc-300">
-  Wähle drei Songs.
-</p>
+            Wähle drei Songs.
+          </p>
         </header>
 
         <div className="sticky top-3 z-10 mt-8 flex items-center justify-between rounded-2xl border border-white/10 bg-zinc-900/95 p-5 shadow-xl backdrop-blur">
@@ -309,11 +349,10 @@ if (hasAlreadyVoted) {
             {[1, 2, 3].map((number) => (
               <span
                 key={number}
-                className={`h-3 w-3 rounded-full ${
-                  selectedSongIds.length >= number
+                className={`h-3 w-3 rounded-full ${selectedSongIds.length >= number
                     ? "bg-red-500"
                     : "bg-zinc-700"
-                }`}
+                  }`}
               />
             ))}
           </div>
@@ -341,13 +380,12 @@ if (hasAlreadyVoted) {
                 type="button"
                 onClick={() => toggleSong(song.id)}
                 disabled={selectionIsFull || isSubmitting}
-                className={`flex w-full items-center justify-between rounded-2xl border px-5 py-4 text-left transition ${
-                  isSelected
+                className={`flex w-full items-center justify-between rounded-2xl border px-5 py-4 text-left transition ${isSelected
                     ? "border-red-500 bg-red-600/20"
                     : selectionIsFull
                       ? "cursor-not-allowed border-white/5 bg-zinc-900/40 text-zinc-600"
                       : "border-white/10 bg-zinc-900 hover:border-white/30 hover:bg-zinc-800"
-                }`}
+                  }`}
               >
                 <span>
                   <span className="block font-bold">{song.title}</span>
@@ -357,11 +395,10 @@ if (hasAlreadyVoted) {
                 </span>
 
                 <span
-                  className={`flex h-8 w-8 items-center justify-center rounded-full border font-bold ${
-                    isSelected
+                  className={`flex h-8 w-8 items-center justify-center rounded-full border font-bold ${isSelected
                       ? "border-red-500 bg-red-500"
                       : "border-zinc-600 text-transparent"
-                  }`}
+                    }`}
                 >
                   ✓
                 </span>
@@ -383,13 +420,13 @@ if (hasAlreadyVoted) {
         )}
 
         <button
-  type="button"
-  onClick={submitVotes}
-  disabled={selectedSongIds.length !== 3 || isSubmitting}
-  className="mt-7 w-full rounded-2xl bg-red-600 px-6 py-5 text-xl font-black transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-400"
->
-  {isSubmitting ? "Wünsche werden gespeichert..." : "Abstimmen"}
-</button>
+          type="button"
+          onClick={submitVotes}
+          disabled={selectedSongIds.length !== 3 || isSubmitting}
+          className="mt-7 w-full rounded-2xl bg-red-600 px-6 py-5 text-xl font-black transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-400"
+        >
+          {isSubmitting ? "Wünsche werden gespeichert..." : "Abstimmen"}
+        </button>
 
         <button
           type="button"
