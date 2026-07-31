@@ -45,6 +45,7 @@ export default function SetlistPage() {
     const [songs, setSongs] = useState<Song[]>([]);
     const [setlist, setSetlist] = useState<SetlistItem[]>([]);
     const [loading, setLoading] = useState(true);
+    const [songSearch, setSongSearch] = useState("");
 
     const [songsWithPdf, setSongsWithPdf] = useState<Set<number>>(
         new Set(),
@@ -275,100 +276,105 @@ export default function SetlistPage() {
         await loadSetlist();
     }
 
-    async function removeSong(itemId: number) {
-        const isRequest = itemId < 0;
-
-        let deleteQuery = supabase
+    async function removeSong(setlistItemId: number) {
+        const { error: deleteError } = await supabase
             .from("setlist_items")
-            .delete();
-
-        if (isRequest) {
-            deleteQuery = deleteQuery
-                .eq("item_type", "request")
-                .eq("request_number", Math.abs(itemId));
-        } else {
-            deleteQuery = deleteQuery
-                .eq("item_type", "song")
-                .eq("song_id", itemId);
-        }
-
-        const { error: deleteError } = await deleteQuery;
+            .delete()
+            .eq("id", setlistItemId);
 
         if (deleteError) {
-            console.error("Fehler beim Löschen:", {
+            console.error("Fehler beim Löschen des Eintrags:", {
                 message: deleteError.message,
                 code: deleteError.code,
                 details: deleteError.details,
                 hint: deleteError.hint,
             });
+
+            alert(
+                `Der Eintrag konnte nicht gelöscht werden: ${deleteError.message}`,
+            );
+
             return;
         }
 
-        // Nach dem Löschen eines Wunschsongs:
-        // übrige Wunschsongs lückenlos neu nummerieren
-        if (isRequest) {
-            const { data: remainingRequests, error: loadError } =
-                await supabase
-                    .from("setlist_items")
-                    .select("id")
-                    .eq("item_type", "request")
-                    .order("position");
+        const { data: remainingItems, error: loadError } =
+            await supabase
+                .from("setlist_items")
+                .select("id, item_type")
+                .order("position");
 
-            if (loadError) {
+        if (loadError) {
+            console.error(
+                "Fehler beim Laden der übrigen Setlist:",
+                loadError,
+            );
+
+            await loadSetlist();
+            return;
+        }
+
+        // Zunächst negative Positionen verwenden, damit keine
+        // doppelten Positionsnummern entstehen.
+        for (
+            let index = 0;
+            index < (remainingItems?.length ?? 0);
+            index++
+        ) {
+            const item = remainingItems![index];
+
+            const { error } = await supabase
+                .from("setlist_items")
+                .update({
+                    position: -(index + 1),
+                })
+                .eq("id", item.id);
+
+            if (error) {
                 console.error(
-                    "Fehler beim Laden der übrigen Wunschsongs:",
-                    loadError,
+                    "Fehler bei der Zwischenspeicherung:",
+                    error,
                 );
+
+                await loadSetlist();
                 return;
             }
+        }
 
-            // Zuerst vorübergehend sehr hohe Nummern vergeben,
-            // damit die Unique-Regel keine Konflikte verursacht
-            for (
-                let index = 0;
-                index < (remainingRequests?.length ?? 0);
-                index++
-            ) {
-                const request = remainingRequests![index];
+        let requestNumber = 1;
 
-                const { error } = await supabase
-                    .from("setlist_items")
-                    .update({
-                        request_number: 1000000 + index,
-                    })
-                    .eq("id", request.id);
+        // Endgültige Positionen und Wunschsongnummern speichern.
+        for (
+            let index = 0;
+            index < (remainingItems?.length ?? 0);
+            index++
+        ) {
+            const item = remainingItems![index];
 
-                if (error) {
-                    console.error(
-                        "Fehler bei der Zwischennummerierung:",
-                        error,
-                    );
-                    return;
-                }
+            const updateData: {
+                position: number;
+                request_number?: number;
+            } = {
+                position: index + 1,
+            };
+
+            if (item.item_type === "request") {
+                updateData.request_number = requestNumber;
+                requestNumber++;
             }
 
-            // Danach endgültig Wunschsong 1, 2, 3 ... vergeben
-            for (
-                let index = 0;
-                index < (remainingRequests?.length ?? 0);
-                index++
-            ) {
-                const request = remainingRequests![index];
+            const { error } = await supabase
+                .from("setlist_items")
+                .update(updateData)
+                .eq("id", item.id);
 
-                const { error } = await supabase
-                    .from("setlist_items")
-                    .update({
-                        request_number: index + 1,
-                    })
-                    .eq("id", request.id);
+            if (error) {
+                console.error(
+                    "Fehler bei der neuen Nummerierung:",
+                    error,
+                );
 
-                if (error) {
-                    console.error(
-                        "Fehler bei der neuen Nummerierung:",
-                        error,
-                    );
-                    return;
-                }
+                await loadSetlist();
+                return;
             }
         }
 
@@ -386,7 +392,7 @@ export default function SetlistPage() {
                 .update({
                     position: -(index + 1),
                 })
-                .eq("song_id", song.id);
+                .eq("id", song.setlistItemId);
 
             if (error) {
                 console.error("Fehler bei der Zwischenspeicherung:", {
@@ -409,8 +415,7 @@ export default function SetlistPage() {
                 .update({
                     position: index + 1,
                 })
-                .eq("song_id", song.id);
-
+                .eq("id", song.setlistItemId);
             if (error) {
                 console.error("Fehler beim Speichern der Reihenfolge:", {
                     message: error.message,
@@ -424,6 +429,30 @@ export default function SetlistPage() {
 
         setSetlist(songs);
     }
+
+    function normalizeSongSearch(text: string) {
+        return text
+            .trim()
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/ß/g, "ss")
+            .replace(/[^a-z0-9]/g, "");
+    }
+
+    const normalizedSongSearch = normalizeSongSearch(songSearch);
+
+    const filteredSongs = songs.filter((song) => {
+        if (!normalizedSongSearch) {
+            return true;
+        }
+
+        const searchableSong = normalizeSongSearch(
+            `${song.title} ${song.artist}`,
+        );
+
+        return searchableSong.includes(normalizedSongSearch);
+    });
 
     return (
         <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-8 text-white sm:px-8">
@@ -495,58 +524,13 @@ export default function SetlistPage() {
                                 </button>
                             </div>
                         ) : (
-                            <div className="space-y-3">
-                                {setlist.map((song, index) => (
-                                    <article
-                                        key={song.id}
-                                        className={`flex items-center gap-4 rounded-2xl border p-4 shadow-lg ${song.itemType === "request"
-                                            ? "border-amber-500/60 bg-amber-500/10"
-                                            : "border-white/10 bg-zinc-900/80"
-                                            }`}
-                                    >
-                                        <div
-                                            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg font-black ${song.itemType === "request"
-                                                ? "bg-amber-500/20 text-amber-300"
-                                                : "bg-zinc-800 text-zinc-400"
-                                                }`}
-                                        >
-                                            {index + 1}
-                                        </div>
-
-                                        <div className="min-w-0 flex-1">
-                                            <h3 className="break-words text-lg font-black leading-snug">
-                                                {song.title}
-                                            </h3>
-
-                                            <p
-                                                className={`mt-1 break-words text-sm ${song.itemType === "request"
-                                                    ? "text-amber-200"
-                                                    : "text-zinc-400"
-                                                    }`}
-                                            >
-                                                {song.artist}
-                                            </p>
-                                        </div>
-
-                                        <button
-                                            type="button"
-                                            onClick={() => openPdf(song.id)}
-                                            disabled={!songsWithPdf.has(song.id)}
-                                            title={
-                                                songsWithPdf.has(song.id)
-                                                    ? "PDF öffnen"
-                                                    : "Keine PDF vorhanden"
-                                            }
-                                            className={`shrink-0 rounded-xl border px-4 py-3 transition ${songsWithPdf.has(song.id)
-                                                ? "border-green-500/50 bg-green-600 text-white hover:bg-green-500"
-                                                : "cursor-not-allowed border-white/10 bg-zinc-800 text-zinc-500 opacity-50"
-                                                }`}
-                                        >
-                                            📄
-                                        </button>
-                                    </article>
-                                ))}
-                            </div>
+                            <SortableSetlist
+                                songs={setlist}
+                                onReorder={saveNewOrder}
+                                onOpenPdf={openPdf}
+                                songsWithPdf={songsWithPdf}
+                                variant="live"
+                            />
                         )}
                     </section>
                 ) : (
@@ -562,61 +546,6 @@ export default function SetlistPage() {
                         </div>
 
                         <div className="grid gap-6 lg:grid-cols-2">
-                            <section className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5">
-                                <div className="mb-5">
-                                    <h3 className="text-2xl font-bold">
-                                        Verfügbare Songs
-                                    </h3>
-
-                                    <p className="mt-1 text-sm text-zinc-400">
-                                        {songs.length} Songs verfügbar
-                                    </p>
-                                </div>
-
-                                {loading ? (
-                                    <p className="text-zinc-400">
-                                        Songs werden geladen …
-                                    </p>
-                                ) : songs.length === 0 ? (
-                                    <p className="text-zinc-400">
-                                        Es wurden keine Songs gefunden.
-                                    </p>
-                                ) : (
-                                    <div className="max-h-[650px] space-y-2 overflow-y-auto pr-2">
-                                        {songs.map((song) => {
-                                            const songIsAlreadyInSetlist = setlist.some(
-                                                (setlistSong) => setlistSong.id === song.id,
-                                            );
-
-                                            return (
-                                                <div
-                                                    key={song.id}
-                                                    className="flex items-center justify-between gap-4 rounded-xl border border-zinc-700 bg-zinc-950/70 p-4"
-                                                >
-                                                    <div className="min-w-0 flex-1">
-                                                        <div className="break-words font-semibold leading-snug">
-                                                            {song.title}
-                                                        </div>
-
-                                                        <div className="mt-1 break-words text-sm text-zinc-400">
-                                                            {song.artist}
-                                                        </div>
-                                                    </div>
-
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => addSong(song)}
-                                                        disabled={songIsAlreadyInSetlist}
-                                                        className="min-w-11 shrink-0 rounded-lg bg-green-600 px-3 py-2 text-lg font-bold transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-500"
-                                                    >
-                                                        {songIsAlreadyInSetlist ? "✓" : "+"}
-                                                    </button>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                            </section>
 
                             <section className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5">
                                 <div className="mb-5 flex items-start justify-between gap-4">
@@ -654,6 +583,100 @@ export default function SetlistPage() {
                                     />
                                 )}
                             </section>
+
+                            <section className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5">
+                                <div className="mb-5">
+                                    <h3 className="text-2xl font-bold">
+                                        Verfügbare Songs
+                                    </h3>
+
+                                    <p className="mt-1 text-sm text-zinc-400">
+                                        {filteredSongs.length} von {songs.length} Songs angezeigt
+                                    </p>
+
+                                    <div className="relative mt-4">
+                                        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500">
+                                            🔎
+                                        </span>
+
+                                        <input
+                                            type="search"
+                                            value={songSearch}
+                                            onChange={(event) => setSongSearch(event.target.value)}
+                                            placeholder="Song oder Interpret suchen …"
+                                            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 py-3 pl-11 pr-11 text-white outline-none placeholder:text-zinc-600 focus:border-red-500"
+                                        />
+
+                                        {songSearch && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setSongSearch("")}
+                                                className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-white"
+                                                aria-label="Suche löschen"
+                                                title="Suche löschen"
+                                            >
+                                                ✕
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {loading ? (
+                                    <p className="text-zinc-400">
+                                        Songs werden geladen …
+                                    </p>
+                                ) : songs.length === 0 ? (
+                                    <p className="text-zinc-400">
+                                        Es sind noch keine Songs in der Songverwaltung vorhanden.
+                                    </p>
+                                ) : filteredSongs.length === 0 ? (
+                                    <div className="rounded-xl border border-dashed border-zinc-700 bg-zinc-950/40 p-6 text-center">
+                                        <p className="font-bold text-zinc-300">
+                                            Kein passender Song gefunden
+                                        </p>
+
+                                        <p className="mt-1 text-sm text-zinc-500">
+                                            Versuche einen anderen Titel oder Interpreten.
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div className="max-h-[650px] space-y-2 overflow-y-auto pr-2">
+                                        {filteredSongs.map((song) => {
+                                            const songIsAlreadyInSetlist = setlist.some(
+                                                (setlistSong) => setlistSong.id === song.id,
+                                            );
+
+                                            return (
+                                                <div
+                                                    key={song.id}
+                                                    className="flex items-center justify-between gap-4 rounded-xl border border-zinc-700 bg-zinc-950/70 p-4"
+                                                >
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="break-words font-semibold leading-snug">
+                                                            {song.title}
+                                                        </div>
+
+                                                        <div className="mt-1 break-words text-sm text-zinc-400">
+                                                            {song.artist}
+                                                        </div>
+                                                    </div>
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => addSong(song)}
+                                                        disabled={songIsAlreadyInSetlist}
+                                                        className="min-w-11 shrink-0 rounded-lg bg-green-600 px-3 py-2 text-lg font-bold transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-500"
+                                                    >
+                                                        {songIsAlreadyInSetlist ? "✓" : "+"}
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </section>
+
+
                         </div>
                     </section>
                 )}

@@ -1,8 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { supabase } from "../../../lib/supabase";
+
+const PdfViewer = dynamic(
+    () => import("../../../components/PdfViewer"),
+    {
+        ssr: false,
+        loading: () => (
+            <div className="flex min-h-[70vh] items-center justify-center text-zinc-400">
+                PDF-Viewer wird geladen …
+            </div>
+        ),
+    },
+);
 
 export default function PdfPage() {
     const params = useParams();
@@ -16,10 +29,19 @@ export default function PdfPage() {
     const [errorMessage, setErrorMessage] = useState("");
 
     useEffect(() => {
-        loadPdf();
-    }, []);
+        void loadPdf();
+    }, [songId]);
 
     async function loadPdf() {
+        setLoading(true);
+        setErrorMessage("");
+
+        if (!Number.isFinite(songId)) {
+            setErrorMessage("Die Song-ID ist ungültig.");
+            setLoading(false);
+            return;
+        }
+
         const {
             data: { user },
         } = await supabase.auth.getUser();
@@ -30,11 +52,18 @@ export default function PdfPage() {
             return;
         }
 
-        const { data: songData } = await supabase
+        const { data: songData, error: songError } = await supabase
             .from("songs")
             .select("title, artist")
             .eq("id", songId)
             .maybeSingle();
+
+        if (songError) {
+            console.error(
+                "Songdaten konnten nicht geladen werden:",
+                songError,
+            );
+        }
 
         if (songData) {
             setSongTitle(
@@ -53,7 +82,9 @@ export default function PdfPage() {
 
         if (pdfError || !pdfData) {
             console.error("PDF nicht gefunden:", pdfError);
-            setErrorMessage("Für diesen Song wurde keine PDF gefunden.");
+            setErrorMessage(
+                "Für diesen Song wurde keine PDF gefunden.",
+            );
             setLoading(false);
             return;
         }
@@ -63,11 +94,12 @@ export default function PdfPage() {
                 .from("song-pdfs")
                 .createSignedUrl(pdfData.storage_path, 3600);
 
-        if (signedUrlError || !signedUrlData) {
+        if (signedUrlError || !signedUrlData?.signedUrl) {
             console.error(
                 "PDF-Link konnte nicht erstellt werden:",
                 signedUrlError,
             );
+
             setErrorMessage("Die PDF konnte nicht geladen werden.");
             setLoading(false);
             return;
@@ -78,12 +110,12 @@ export default function PdfPage() {
     }
 
     return (
-        <main className="min-h-screen bg-zinc-950 text-white">
-            <header className="flex items-center gap-4 border-b border-white/10 bg-zinc-900 px-4 py-4">
+        <main className="flex h-screen flex-col overflow-hidden bg-zinc-950 text-white">
+            <header className="flex shrink-0 items-center gap-4 border-b border-white/10 bg-zinc-900 px-3 py-3 sm:px-4">
                 <button
                     type="button"
                     onClick={() => router.back()}
-                    className="rounded-xl bg-zinc-800 px-4 py-3 font-bold transition hover:bg-zinc-700"
+                    className="shrink-0 rounded-xl bg-zinc-800 px-4 py-3 font-bold transition hover:bg-zinc-700"
                 >
                     ← Zurück
                 </button>
@@ -93,14 +125,14 @@ export default function PdfPage() {
                         Deine Setlist
                     </p>
 
-                    <h1 className="truncate text-lg font-black sm:text-2xl">
+                    <h1 className="truncate text-base font-black sm:text-xl">
                         {songTitle || "Song-PDF"}
                     </h1>
                 </div>
             </header>
 
             {loading ? (
-                <div className="flex min-h-[70vh] items-center justify-center text-zinc-400">
+                <div className="flex min-h-0 flex-1 items-center justify-center text-zinc-400">
                     PDF wird geladen …
                 </div>
             ) : errorMessage ? (
@@ -117,13 +149,9 @@ export default function PdfPage() {
                         Zurück zur Setlist
                     </button>
                 </div>
-            ) : (
-                <iframe
-                    src={pdfUrl ?? ""}
-                    title={songTitle || "Song-PDF"}
-                    className="h-[calc(100vh-89px)] w-full border-0"
-                />
-            )}
+            ) : pdfUrl ? (
+                <PdfViewer pdfUrl={pdfUrl} />
+            ) : null}
         </main>
     );
 }
