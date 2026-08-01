@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import AdminNavigation from "../components/AdminNavigation";
 import { supabase } from "../lib/supabase";
 
 type Concert = {
@@ -11,53 +12,126 @@ type Concert = {
   is_active: boolean;
 };
 
+type VoteRow = {
+  song_id: number;
+  song_title: string;
+  artist: string;
+};
+
+type RankingSong = {
+  songId: number;
+  songTitle: string;
+  artist: string;
+  votes: number;
+};
+
+type AnalyticsView = "ranking" | "history";
+
 export default function ArchivePage() {
+  const [view, setView] =
+    useState<AnalyticsView>("ranking");
   const [concerts, setConcerts] = useState<Concert[]>([]);
+  const [ranking, setRanking] = useState<RankingSong[]>([]);
   const [loading, setLoading] = useState(true);
-  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(
+    null,
+  );
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    loadConcerts();
+    void loadArchive();
   }, []);
 
-  async function loadConcerts() {
+  async function loadArchive() {
     setLoading(true);
     setErrorMessage("");
 
-    const { data, error } = await supabase
-      .from("concerts")
-      .select("id, name, created_at, is_active")
-      .order("created_at", { ascending: false });
+    const [concertResponse, voteResponse] = await Promise.all([
+      supabase
+        .from("concerts")
+        .select("id, name, created_at, is_active")
+        .eq("is_active", false)
+        .order("created_at", { ascending: false }),
 
-    if (error) {
+      supabase
+        .from("votes")
+        .select("song_id, song_title, artist"),
+    ]);
+
+    if (concertResponse.error) {
       console.error(
-        "Konzerte konnten nicht geladen werden:",
-        error.message,
+        "Vergangene Konzerte konnten nicht geladen werden:",
+        concertResponse.error.message,
+        concertResponse.error.code,
+        concertResponse.error.details,
+        concertResponse.error.hint,
       );
 
       setErrorMessage(
-        "Die Konzerte konnten nicht geladen werden.",
+        "Die vergangenen Konzerte konnten nicht geladen werden.",
       );
-
-      setLoading(false);
-      return;
+    } else {
+      setConcerts(concertResponse.data ?? []);
     }
 
-    setConcerts(data ?? []);
+    if (voteResponse.error) {
+      console.error(
+        "Ranking konnte nicht geladen werden:",
+        voteResponse.error.message,
+        voteResponse.error.code,
+        voteResponse.error.details,
+        voteResponse.error.hint,
+      );
+
+      setErrorMessage((currentMessage) =>
+        currentMessage
+          ? `${currentMessage} Das Ranking konnte ebenfalls nicht geladen werden.`
+          : "Das Top-10-Ranking konnte nicht geladen werden.",
+      );
+    } else {
+      const groupedVotes = new Map<number, RankingSong>();
+
+      (voteResponse.data as VoteRow[] | null)?.forEach((vote) => {
+        const existingSong = groupedVotes.get(vote.song_id);
+
+        if (existingSong) {
+          existingSong.votes += 1;
+          return;
+        }
+
+        groupedVotes.set(vote.song_id, {
+          songId: vote.song_id,
+          songTitle: vote.song_title,
+          artist: vote.artist,
+          votes: 1,
+        });
+      });
+
+      const topTen = Array.from(groupedVotes.values())
+        .sort((firstSong, secondSong) => {
+          if (secondSong.votes !== firstSong.votes) {
+            return secondSong.votes - firstSong.votes;
+          }
+
+          return firstSong.songTitle.localeCompare(
+            secondSong.songTitle,
+            "de",
+          );
+        })
+        .slice(0, 10);
+
+      setRanking(topTen);
+    }
+
     setLoading(false);
   }
 
   async function deleteConcert(concert: Concert) {
-    if (concert.is_active) {
-      alert(
-        "Das aktive Konzert kann nicht gelöscht werden. Beende es zuerst.",
-      );
-      return;
-    }
-
     const confirmed = window.confirm(
-      `Möchtest du das Konzert „${concert.name}“ wirklich löschen?\n\nDabei werden automatisch alle Stimmen, gespielten Songs und der aktuelle Song gelöscht.`,
+      `Konzert „${concert.name}“ endgültig löschen?\n\n` +
+      "ACHTUNG: Dabei werden auch alle Stimmen dieses Konzerts gelöscht. " +
+      "Die Stimmen werden anschließend nicht mehr im Top-Ranking berücksichtigt.\n\n" +
+      "Diese Aktion kann nicht rückgängig gemacht werden.",
     );
 
     if (!confirmed) {
@@ -68,117 +142,242 @@ export default function ArchivePage() {
     setErrorMessage("");
 
     const {
-      data: deletedConcerts,
-      error: concertError,
-    } = await supabase
-      .from("concerts")
-      .delete()
-      .eq("id", concert.id)
-      .select("id");
+      data: wasDeleted,
+      error: deleteError,
+    } = await supabase.rpc("delete_archived_concert", {
+      p_concert_id: concert.id,
+    });
 
-    if (concertError) {
+    if (deleteError) {
       console.error(
         "Konzert konnte nicht gelöscht werden:",
-        concertError.message,
+        deleteError.message,
+        deleteError.code,
+        deleteError.details,
+        deleteError.hint,
       );
 
       setErrorMessage(
-        "Das Konzert konnte nicht gelöscht werden.",
+        `Das Konzert konnte nicht gelöscht werden: ${deleteError.message}`,
       );
 
       setDeletingId(null);
       return;
     }
 
-    if (!deletedConcerts || deletedConcerts.length === 0) {
-      console.error(
-        "Supabase hat keinen Datensatz gelöscht.",
-      );
-
+    if (!wasDeleted) {
       setErrorMessage(
-        "Das Konzert wurde nicht gelöscht.",
+        "Das Konzert wurde nicht gefunden oder ist noch aktiv.",
       );
 
       setDeletingId(null);
       return;
     }
 
-    setConcerts((currentConcerts) =>
-      currentConcerts.filter(
-        (currentConcert) =>
-          currentConcert.id !== concert.id,
-      ),
-    );
-
+    await loadArchive();
     setDeletingId(null);
   }
 
+  function getPosition(index: number) {
+    if (index === 0) {
+      return "🥇";
+    }
+
+    if (index === 1) {
+      return "🥈";
+    }
+
+    if (index === 2) {
+      return "🥉";
+    }
+
+    return `${index + 1}.`;
+  }
+
   return (
-    <main className="min-h-screen bg-zinc-900 p-8 text-white">
-      <div className="mx-auto max-w-3xl">
-        <h1 className="mb-8 text-4xl font-bold">
-          Konzertarchiv
-        </h1>
+    <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-8 text-white sm:px-8">
+      <div className="mx-auto max-w-7xl">
+        <AdminNavigation />
+
+        <div className="mb-10">
+          <p className="text-sm font-black uppercase tracking-[0.35em] text-red-500">
+            Deine Setlist
+          </p>
+
+          <h1 className="mt-3 text-4xl font-black sm:text-6xl">
+            Analytics
+          </h1>
+
+          <p className="mt-3 max-w-2xl text-zinc-400">
+            Vergangene Konzerte und die beliebtesten
+            Publikumswünsche im Überblick.
+          </p>
+        </div>
 
         {errorMessage && (
-          <div className="mb-6 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-red-200">
+          <div className="mb-8 rounded-2xl border border-red-500/40 bg-red-500/10 p-5 text-red-200">
             {errorMessage}
           </div>
         )}
 
-        {loading ? (
-          <p className="text-gray-400">
-            Konzerte werden geladen …
-          </p>
-        ) : concerts.length === 0 ? (
-          <p className="text-gray-400">
-            Es wurden noch keine Konzerte angelegt.
-          </p>
-        ) : (
-          <div className="space-y-4">
-            {concerts.map((concert) => (
-              <div
-                key={concert.id}
-                className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-5"
-              >
-                <Link
-                  href={`/archive/${concert.id}`}
-                  className="min-w-0 flex-1 rounded-xl transition hover:opacity-75"
-                >
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="min-w-0">
-                      <h2 className="truncate text-xl font-bold">
-                        {concert.name}
-                      </h2>
+        <div className="mb-8 flex justify-center sm:justify-start">
+          <div className="inline-flex rounded-2xl border border-white/10 bg-zinc-900 p-1">
+            <button
+              type="button"
+              onClick={() => setView("ranking")}
+              className={`rounded-xl px-5 py-3 font-black transition ${view === "ranking"
+                ? "bg-red-600 text-white"
+                : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                }`}
+            >
+              🏆 Top-Ranking
+            </button>
 
-                      <p className="mt-1 text-sm text-gray-400">
-                        {new Date(
-                          concert.created_at,
-                        ).toLocaleString("de-DE")}
+            <button
+              type="button"
+              onClick={() => setView("history")}
+              className={`rounded-xl px-5 py-3 font-black transition ${view === "history"
+                ? "bg-red-600 text-white"
+                : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                }`}
+            >
+              🕘 History
+            </button>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="rounded-3xl border border-white/10 bg-zinc-900 p-10 text-center text-zinc-400">
+            Analytics werden geladen …
+          </div>
+        ) : view === "ranking" ? (
+          <section className="mx-auto max-w-3xl">
+            <div className="mb-5">
+              <h2 className="text-2xl font-black sm:text-3xl">
+                Top 10 Wünsche
+              </h2>
+
+              <p className="mt-1 text-sm text-zinc-500">
+                Meistgewählte Songs über alle vergangenen Konzerte
+              </p>
+            </div>
+
+            {ranking.length === 0 ? (
+              <div className="rounded-3xl border border-white/10 bg-zinc-900/70 p-8 text-zinc-400">
+                Es wurden noch keine Stimmen abgegeben.
+              </div>
+            ) : (
+              <ol className="space-y-3">
+                {ranking.map((song, index) => (
+                  <li
+                    key={song.songId}
+                    className={`flex items-center gap-4 rounded-2xl border p-4 ${index === 0
+                      ? "border-yellow-400/70 bg-yellow-500/10"
+                      : index === 1
+                        ? "border-slate-300/60 bg-slate-300/10"
+                        : index === 2
+                          ? "border-amber-700/70 bg-amber-700/10"
+                          : "border-white/10 bg-zinc-900/70"
+                      }`}
+                  >
+                    <div
+                      className={`flex w-12 shrink-0 items-center justify-center font-black ${index < 3
+                        ? "text-3xl"
+                        : "text-lg text-zinc-500"
+                        }`}
+                    >
+                      {getPosition(index)}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <h3 className="truncate font-black">
+                        {song.songTitle}
+                      </h3>
+
+                      <p className="truncate text-sm text-zinc-400">
+                        {song.artist}
                       </p>
                     </div>
 
-                    {concert.is_active && (
-                      <span className="shrink-0 rounded-full bg-green-600 px-3 py-1 text-sm font-bold">
-                        Aktiv
-                      </span>
-                    )}
-                  </div>
-                </Link>
+                    <div className="shrink-0 text-right">
+                      <p className="text-2xl font-black text-red-500">
+                        {song.votes}
+                      </p>
 
-                <button
-                  type="button"
-                  onClick={() => deleteConcert(concert)}
-                  disabled={deletingId === concert.id}
-                  className="shrink-0 rounded-xl bg-red-600 px-4 py-2 font-bold transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {deletingId === concert.id
-                    ? "Lösche …"
-                    : "Löschen"}
-                </button>
+                      <p className="text-xs text-zinc-500">
+                        {song.votes === 1
+                          ? "Wunsch"
+                          : "Wünsche"}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+        ) : (
+          <section className="mx-auto max-w-4xl">
+            <div className="mb-5">
+              <h2 className="text-2xl font-black sm:text-3xl">
+                Vergangene Konzerte
+              </h2>
+
+              <p className="mt-1 text-sm text-zinc-500">
+                {concerts.length} beendete{" "}
+                {concerts.length === 1
+                  ? "Veranstaltung"
+                  : "Veranstaltungen"}
+              </p>
+            </div>
+
+            {concerts.length === 0 ? (
+              <div className="rounded-3xl border border-white/10 bg-zinc-900/70 p-8 text-zinc-400">
+                Es wurden noch keine Konzerte beendet.
               </div>
-            ))}
-          </div>
+            ) : (
+              <div className="space-y-4">
+                {concerts.map((concert) => (
+                  <article
+                    key={concert.id}
+                    className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-zinc-900/80 p-5 transition hover:border-white/25 sm:flex-row sm:items-center"
+                  >
+                    <Link
+                      href={`/archive/${concert.id}`}
+                      className="min-w-0 flex-1"
+                    >
+                      <h3 className="truncate text-xl font-black">
+                        {concert.name}
+                      </h3>
+
+                      <p className="mt-1 text-sm text-zinc-500">
+                        {new Date(
+                          concert.created_at,
+                        ).toLocaleString("de-DE", {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })}
+                      </p>
+
+                      <p className="mt-3 text-sm font-bold text-red-400">
+                        Auswertung ansehen →
+                      </p>
+                    </Link>
+
+                    <button
+                      type="button"
+                      onClick={() => deleteConcert(concert)}
+                      disabled={deletingId === concert.id}
+                      className="shrink-0 rounded-xl bg-red-950 px-4 py-3 font-bold text-red-300 transition hover:bg-red-900 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {deletingId === concert.id
+                        ? "Lösche …"
+                        : "🗑 Löschen"}
+                    </button>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
         )}
       </div>
     </main>

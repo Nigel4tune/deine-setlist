@@ -23,8 +23,8 @@ export default function AdminNavigation() {
         <Link
           href="/admin"
           className={`rounded-2xl px-5 py-3 font-bold transition ${pathname === "/admin"
-              ? "bg-red-600 text-white"
-              : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+            ? "bg-red-600 text-white"
+            : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
             }`}
         >
           🎤 Konzertsteuerung
@@ -33,8 +33,8 @@ export default function AdminNavigation() {
         <Link
           href="/admin/setlist"
           className={`rounded-2xl px-5 py-3 font-bold transition ${pathname === "/admin/setlist"
-              ? "bg-red-600 text-white"
-              : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+            ? "bg-red-600 text-white"
+            : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
             }`}
         >
           📋 Setlist
@@ -43,19 +43,29 @@ export default function AdminNavigation() {
         <Link
           href="/admin/songs"
           className={`rounded-2xl px-5 py-3 font-bold transition ${pathname === "/admin/songs"
+            ? "bg-red-600 text-white"
+            : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+            }`}
+        >
+          🎵 Songverwaltung
+        </Link>
+        
+        <Link
+          href="/archive"
+          className={`rounded-2xl px-5 py-3 font-bold transition ${pathname.startsWith("/archive")
               ? "bg-red-600 text-white"
               : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
             }`}
         >
-          🎵 Songverwaltung
+          📊 Analytics
         </Link>
       </div>
 
       <Link
         href="/admin/qr"
         className={`rounded-2xl px-5 py-3 font-bold transition ${pathname === "/admin/qr"
-            ? "bg-red-600 text-white"
-            : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+          ? "bg-red-600 text-white"
+          : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
           }`}
       >
         📱 QR-Code
