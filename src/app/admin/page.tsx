@@ -553,7 +553,10 @@ export default function AdminPage() {
       if (currentSongError) {
         console.error(
           "Fehler beim Setzen des aktuellen Songs:",
-          currentSongError,
+          currentSongError.message,
+          currentSongError.code,
+          currentSongError.details,
+          currentSongError.hint,
         );
 
         setErrorMessage(
@@ -581,63 +584,63 @@ export default function AdminPage() {
   }
 
   async function startNewConcert() {
-  const concertName = newConcertName.trim();
+    const concertName = newConcertName.trim();
 
-  if (!concertName) {
-    alert("Bitte gib einen Konzertnamen ein.");
-    return;
-  }
-
-  if (isStartingConcert) {
-    return;
-  }
-
-  setErrorMessage("");
-  setIsStartingConcert(true);
-
-  try {
-    const { data: newConcertId, error: createError } =
-      await supabase.rpc("start_new_concert", {
-        p_name: concertName,
-      });
-
-    if (createError || newConcertId === null) {
-      console.error(
-        "Neues Konzert konnte nicht erstellt werden:",
-        createError?.message,
-        createError?.code,
-        createError?.details,
-        createError?.hint,
-      );
-
-      setErrorMessage(
-        createError?.message
-          ? `Das Konzert konnte nicht gestartet werden: ${createError.message}`
-          : "Das Konzert konnte nicht gestartet werden.",
-      );
-
+    if (!concertName) {
+      alert("Bitte gib einen Konzertnamen ein.");
       return;
     }
 
-    setIsConcertActive(true);
-    setShowNewConcertDialog(false);
-    setNewConcertName("");
-    setCurrentSongId(null);
-    setResults([]);
+    if (isStartingConcert) {
+      return;
+    }
 
-    await loadVotes(true);
-  } catch (error) {
-    console.error("Fehler beim Starten des Konzerts:", error);
+    setErrorMessage("");
+    setIsStartingConcert(true);
 
-    setErrorMessage(
-      error instanceof Error
-        ? error.message
-        : "Beim Starten des Konzerts ist ein Fehler aufgetreten.",
-    );
-  } finally {
-    setIsStartingConcert(false);
+    try {
+      const { data: newConcertId, error: createError } =
+        await supabase.rpc("start_new_concert", {
+          p_name: concertName,
+        });
+
+      if (createError || newConcertId === null) {
+        console.error(
+          "Neues Konzert konnte nicht erstellt werden:",
+          createError?.message,
+          createError?.code,
+          createError?.details,
+          createError?.hint,
+        );
+
+        setErrorMessage(
+          createError?.message
+            ? `Das Konzert konnte nicht gestartet werden: ${createError.message}`
+            : "Das Konzert konnte nicht gestartet werden.",
+        );
+
+        return;
+      }
+
+      setIsConcertActive(true);
+      setShowNewConcertDialog(false);
+      setNewConcertName("");
+      setCurrentSongId(null);
+      setResults([]);
+
+      await loadVotes(true);
+    } catch (error) {
+      console.error("Fehler beim Starten des Konzerts:", error);
+
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Beim Starten des Konzerts ist ein Fehler aufgetreten.",
+      );
+    } finally {
+      setIsStartingConcert(false);
+    }
   }
-}
 
   function getPositionLabel(index: number) {
     if (index === 0) {
@@ -656,67 +659,67 @@ export default function AdminPage() {
   }
 
   async function endConcert() {
-  if (isEndingConcert) {
-    return;
-  }
+    if (isEndingConcert) {
+      return;
+    }
 
-  const confirmed = window.confirm(
-    "Möchtest du das aktuelle Konzert wirklich beenden?",
-  );
+    const confirmed = window.confirm(
+      "Möchtest du das aktuelle Konzert wirklich beenden?",
+    );
 
-  if (!confirmed) {
-    return;
-  }
+    if (!confirmed) {
+      return;
+    }
 
-  setErrorMessage("");
-  setIsEndingConcert(true);
+    setErrorMessage("");
+    setIsEndingConcert(true);
 
-  try {
-    const { data: endedConcertId, error: updateError } =
-      await supabase.rpc("end_active_concert");
+    try {
+      const { data: endedConcertId, error: updateError } =
+        await supabase.rpc("end_active_concert");
 
-    if (updateError) {
-      console.error(
-        "Konzert konnte nicht beendet werden:",
-        updateError.message,
-        updateError.code,
-        updateError.details,
-        updateError.hint,
-      );
+      if (updateError) {
+        console.error(
+          "Konzert konnte nicht beendet werden:",
+          updateError.message,
+          updateError.code,
+          updateError.details,
+          updateError.hint,
+        );
+
+        setErrorMessage(
+          `Das Konzert konnte nicht beendet werden: ${updateError.message}`,
+        );
+
+        return;
+      }
+
+      if (endedConcertId === null) {
+        setIsConcertActive(false);
+        setErrorMessage("Es wurde kein aktives Konzert gefunden.");
+        return;
+      }
+
+      setIsConcertActive(false);
+      setResults([]);
+      setCurrentSongId(null);
+      setLastUpdated(null);
+
+      await checkConcertStatus();
+
+      alert("Das Konzert wurde beendet.");
+    } catch (error) {
+      console.error("Fehler beim Beenden des Konzerts:", error);
 
       setErrorMessage(
-        `Das Konzert konnte nicht beendet werden: ${updateError.message}`,
+        error instanceof Error
+          ? error.message
+          : "Beim Beenden des Konzerts ist ein Fehler aufgetreten.",
       );
-
-      return;
+    } finally {
+      setIsEndingConcert(false);
     }
-
-    if (endedConcertId === null) {
-      setIsConcertActive(false);
-      setErrorMessage("Es wurde kein aktives Konzert gefunden.");
-      return;
-    }
-
-    setIsConcertActive(false);
-    setResults([]);
-    setCurrentSongId(null);
-    setLastUpdated(null);
-
-    await checkConcertStatus();
-
-    alert("Das Konzert wurde beendet.");
-  } catch (error) {
-    console.error("Fehler beim Beenden des Konzerts:", error);
-
-    setErrorMessage(
-      error instanceof Error
-        ? error.message
-        : "Beim Beenden des Konzerts ist ein Fehler aufgetreten.",
-    );
-  } finally {
-    setIsEndingConcert(false);
   }
-}
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-8 text-white sm:px-8">
@@ -867,27 +870,50 @@ export default function AdminPage() {
                     ? (song.votes / highestOpenVoteCount) * 100
                     : 0;
 
-                const isTopThree = index < 3;
                 const isChanging =
                   changingSongId === song.songId;
+
+                const cardStyle =
+                  index === 0
+                    ? "min-h-[190px] border-2 border-yellow-400 bg-gradient-to-r from-yellow-950/40 to-zinc-900 p-7 shadow-[0_0_30px_rgba(250,204,21,0.16)]"
+                    : index === 1
+                      ? "min-h-[165px] border-2 border-slate-300 bg-gradient-to-r from-slate-700/30 to-zinc-900 p-6 shadow-[0_0_24px_rgba(203,213,225,0.12)]"
+                      : index === 2
+                        ? "min-h-[155px] border-2 border-amber-700 bg-gradient-to-r from-amber-950/30 to-zinc-900 p-6 shadow-[0_0_22px_rgba(180,83,9,0.12)]"
+                        : "min-h-[125px] border border-white/10 bg-zinc-900/70 p-4";
+
+                const medalStyle =
+                  index === 0
+                    ? "text-6xl"
+                    : index === 1
+                      ? "text-5xl"
+                      : index === 2
+                        ? "text-5xl"
+                        : "text-2xl text-zinc-500";
+
+                const titleStyle =
+                  index === 0
+                    ? "text-2xl sm:text-3xl"
+                    : index < 3
+                      ? "text-xl sm:text-2xl"
+                      : "text-lg";
 
                 return (
                   <article
                     key={song.songId}
-                    className={`overflow-hidden rounded-2xl border p-5 shadow-lg ${isTopThree
-                      ? "border-red-500/40 bg-zinc-900"
-                      : "border-white/10 bg-zinc-900/70"
-                      }`}
+                    className={`overflow-hidden rounded-2xl shadow-lg transition-all ${cardStyle}`}
                   >
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                      <div className="flex min-w-12 items-center justify-center text-xl font-black">
+                      <div
+                        className={`flex min-w-16 shrink-0 items-center justify-center font-black ${medalStyle}`}
+                      >
                         {getPositionLabel(index)}
                       </div>
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-5">
                           <div className="min-w-0">
-                            <h3 className="truncate text-lg font-black">
+                            <h3 className={`truncate font-black ${titleStyle}`}>
                               {song.songTitle}
                             </h3>
 
