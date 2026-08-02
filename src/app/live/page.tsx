@@ -257,7 +257,7 @@ const loadLiveResults = useCallback(async () => {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-8 pb-28text-white sm:px-8">
+    <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-8 pb-28 text-white sm:px-8">
       <div className="mx-auto max-w-3xl">
         <header className="text-center">
           <p className="text-sm font-bold uppercase tracking-[0.35em] text-red-500">

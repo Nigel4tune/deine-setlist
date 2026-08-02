@@ -88,27 +88,25 @@ function SortableItem({
     <article
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-3 rounded-2xl border p-4 shadow-lg transition ${
-        isDragging
-          ? "relative z-50 border-red-500 bg-zinc-800 opacity-90 shadow-2xl"
-          : isCurrentSong
-            ? "border-red-500 bg-red-950/40 shadow-red-950/40"
-            : isRequest
-              ? "border-amber-500/60 bg-amber-500/10"
-              : variant === "live"
-                ? "border-white/10 bg-zinc-900/80"
-                : "border-zinc-700 bg-zinc-950/70"
-      }`}
+      className={`flex items-center gap-3 rounded-2xl border p-4 shadow-lg transition ${isDragging
+        ? "relative z-50 border-red-500 bg-zinc-800 opacity-90 shadow-2xl"
+        : isCurrentSong
+          ? "border-red-500 bg-red-950/40 shadow-red-950/40"
+          : isRequest
+            ? "border-amber-500/60 bg-amber-500/10"
+            : variant === "live"
+              ? "border-white/10 bg-zinc-900/80"
+              : "border-zinc-700 bg-zinc-950/70"
+        }`}
     >
       <button
         type="button"
         {...attributes}
         {...listeners}
-        className={`flex h-11 w-11 shrink-0 cursor-grab touch-none items-center justify-center rounded-xl text-xl active:cursor-grabbing ${
-          isRequest
-            ? "bg-amber-500/20 text-amber-300"
-            : "bg-zinc-800 text-zinc-300"
-        }`}
+        className={`flex h-11 w-11 shrink-0 cursor-grab touch-none items-center justify-center rounded-xl text-xl active:cursor-grabbing ${isRequest
+          ? "bg-amber-500/20 text-amber-300"
+          : "bg-zinc-800 text-zinc-300"
+          }`}
         title="Gedrückt halten und verschieben"
         aria-label={`${item.title} verschieben`}
       >
@@ -116,28 +114,25 @@ function SortableItem({
       </button>
 
       <div
-        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg font-black ${
-          isRequest
-            ? "bg-amber-500/20 text-amber-300"
-            : "bg-zinc-800 text-zinc-400"
-        }`}
+        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg font-black ${isRequest
+          ? "bg-amber-500/20 text-amber-300"
+          : "bg-zinc-800 text-zinc-400"
+          }`}
       >
         {index + 1}
       </div>
 
       <div className="min-w-0 flex-1">
         <h3
-          className={`break-words font-black leading-snug ${
-            variant === "live" ? "text-lg" : ""
-          } ${isRequest ? "text-amber-200" : "text-white"}`}
+          className={`break-words font-black leading-snug ${variant === "live" ? "text-lg" : ""
+            } ${isRequest ? "text-amber-200" : "text-white"}`}
         >
           {item.title}
         </h3>
 
         <p
-          className={`mt-1 break-words text-sm ${
-            isRequest ? "text-amber-300" : "text-zinc-400"
-          }`}
+          className={`mt-1 break-words text-sm ${isRequest ? "text-amber-300" : "text-zinc-400"
+            }`}
         >
           {item.artist}
         </p>
@@ -146,8 +141,18 @@ function SortableItem({
       {variant === "live" && (
         <button
           type="button"
-          onClick={() => void onPlay?.(item)}
-          disabled={!canPlay || changingSongId !== null}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            if (onPlay) {
+              void onPlay(item);
+            }
+          }}
+          disabled={!canPlay || isChangingSong}
           title={
             !canPlay
               ? "Dieser Wunschsong ist noch nicht belegt"
@@ -156,13 +161,12 @@ function SortableItem({
                 : "Song jetzt spielen"
           }
           aria-label={`${item.title} jetzt spielen`}
-          className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border text-xl font-black transition ${
-            isCurrentSong
-              ? "border-red-400 bg-red-600 text-white"
-              : canPlay
-                ? "border-blue-500/50 bg-blue-600 text-white hover:bg-blue-500"
-                : "cursor-not-allowed border-white/10 bg-zinc-800 text-zinc-600 opacity-50"
-          }`}
+          className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border text-xl font-black transition ${isCurrentSong
+            ? "border-red-400 bg-red-600 text-white"
+            : canPlay
+              ? "border-blue-500/50 bg-blue-600 text-white hover:bg-blue-500"
+              : "cursor-not-allowed border-white/10 bg-zinc-800 text-zinc-600 opacity-50"
+            }`}
         >
           {isChangingSong ? "…" : "▶"}
         </button>
@@ -174,11 +178,10 @@ function SortableItem({
           onClick={() => onOpenPdf?.(item.id)}
           disabled={!hasPdf}
           title={hasPdf ? "PDF öffnen" : "Keine PDF vorhanden"}
-          className={`shrink-0 rounded-xl border px-4 py-3 transition ${
-            hasPdf
-              ? "border-green-500/50 bg-green-600 text-white hover:bg-green-500"
-              : "cursor-not-allowed border-white/10 bg-zinc-800 text-zinc-500 opacity-50"
-          }`}
+          className={`shrink-0 rounded-xl border px-4 py-3 transition ${hasPdf
+            ? "border-green-500/50 bg-green-600 text-white hover:bg-green-500"
+            : "cursor-not-allowed border-white/10 bg-zinc-800 text-zinc-500 opacity-50"
+            }`}
         >
           📄
         </button>
@@ -188,11 +191,10 @@ function SortableItem({
         <button
           type="button"
           onClick={() => onRemove(item.setlistItemId)}
-          className={`shrink-0 rounded-xl px-3 py-2 font-bold transition ${
-            isRequest
-              ? "bg-amber-950 text-amber-300 hover:bg-amber-900"
-              : "bg-red-950 text-red-300 hover:bg-red-900"
-          }`}
+          className={`shrink-0 rounded-xl px-3 py-2 font-bold transition ${isRequest
+            ? "bg-amber-950 text-amber-300 hover:bg-amber-900"
+            : "bg-red-950 text-red-300 hover:bg-red-900"
+            }`}
           title="Eintrag entfernen"
           aria-label={`${item.title} entfernen`}
         >

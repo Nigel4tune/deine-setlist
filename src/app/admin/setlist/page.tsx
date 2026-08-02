@@ -19,6 +19,7 @@ import {
 import AdminNavigation from "../../components/AdminNavigation";
 import { supabase } from "../../lib/supabase";
 import SortableSetlist from "../../components/SortableSetlist";
+import { getActiveConcertId } from "../../lib/concert";
 
 type Song = {
     id: number;
@@ -46,6 +47,13 @@ export default function SetlistPage() {
     const [setlist, setSetlist] = useState<SetlistItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [songSearch, setSongSearch] = useState("");
+    const [currentSongId, setCurrentSongId] = useState<number | null>(
+        null,
+    );
+    const [changingSongId, setChangingSongId] = useState<number | null>(
+        null,
+    );
+    const [playError, setPlayError] = useState("");
 
     const [songsWithPdf, setSongsWithPdf] = useState<Set<number>>(
         new Set(),
@@ -54,6 +62,7 @@ export default function SetlistPage() {
     useEffect(() => {
         loadSongs();
         loadSetlist();
+        loadCurrentSong();
     }, []);
 
     async function loadSongs() {
@@ -174,6 +183,91 @@ export default function SetlistPage() {
     function openPdf(songId: number) {
         window.location.href = `/admin/pdf/${songId}`;
     }
+    async function loadCurrentSong() {
+        try {
+            const concertId = await getActiveConcertId();
+
+            const { data, error } = await supabase
+                .from("current_song")
+                .select("song_id")
+                .eq("concert_id", concertId)
+                .maybeSingle();
+
+            if (error) {
+                console.error(
+                    "Aktueller Song konnte nicht geladen werden:",
+                    error.message,
+                    error.code,
+                    error.details,
+                    error.hint,
+                );
+                return;
+            }
+
+            setCurrentSongId(data?.song_id ?? null);
+        } catch {
+            // Ohne aktives Konzert ist noch kein Song ausgewählt.
+            setCurrentSongId(null);
+        }
+    }
+
+    async function playSetlistSong(item: SetlistItem) {
+        if (changingSongId !== null || item.id <= 0) {
+            return;
+        }
+
+        setChangingSongId(item.id);
+        setPlayError("");
+
+        try {
+            const concertId = await getActiveConcertId();
+
+            const { error } = await supabase
+                .from("current_song")
+                .upsert(
+                    {
+                        concert_id: concertId,
+                        setlist_item_id: item.setlistItemId,
+                        song_id: item.id,
+                        song_title: item.title,
+                        artist: item.artist,
+                        updated_at: new Date().toISOString(),
+                    },
+                    {
+                        onConflict: "concert_id",
+                    },
+                );
+
+            if (error) {
+                console.error(
+                    "Aktueller Song konnte nicht gespeichert werden:",
+                    error.message,
+                    error.code,
+                    error.details,
+                    error.hint,
+                );
+
+                setPlayError(
+                    "Der Song konnte nicht gestartet werden.",
+                );
+                return;
+            }
+
+            setCurrentSongId(item.id);
+        } catch (error) {
+            console.error(
+                "Aktives Konzert konnte nicht geladen werden:",
+                error,
+            );
+
+            setPlayError(
+                "Bitte starte zuerst ein Konzert.",
+            );
+        } finally {
+            setChangingSongId(null);
+        }
+    }
+
 
     async function addSong(song: Song) {
         const songIsAlreadyInSetlist = setlist.some(
@@ -524,13 +618,24 @@ export default function SetlistPage() {
                                 </button>
                             </div>
                         ) : (
-                            <SortableSetlist
-                                songs={setlist}
-                                onReorder={saveNewOrder}
-                                onOpenPdf={openPdf}
-                                songsWithPdf={songsWithPdf}
-                                variant="live"
-                            />
+                            <>
+                                {playError && (
+                                    <div className="mb-4 rounded-xl border border-red-500/40 bg-red-950/50 p-4 font-semibold text-red-300">
+                                        {playError}
+                                    </div>
+                                )}
+
+                                <SortableSetlist
+                                    songs={setlist}
+                                    onReorder={saveNewOrder}
+                                    onOpenPdf={openPdf}
+                                    onPlay={playSetlistSong}
+                                    currentSongId={currentSongId}
+                                    changingSongId={changingSongId}
+                                    songsWithPdf={songsWithPdf}
+                                    variant="live"
+                                />
+                            </>
                         )}
                     </section>
                 ) : (

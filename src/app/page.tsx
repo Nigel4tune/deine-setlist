@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabase";
 import { getActiveConcertId } from "./lib/concert";
 import { getDeviceId } from "./lib/device";
@@ -27,11 +27,18 @@ export default function Home() {
   const [songs, setSongs] = useState<Song[]>([]);
   const [screen, setScreen] = useState<Screen>("landing");
   const [selectedSongIds, setSelectedSongIds] = useState<number[]>([]);
+  const [submittedSongs, setSubmittedSongs] = useState<Song[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+
   const [hasAlreadyVoted, setHasAlreadyVoted] = useState(false);
   const [isCheckingVote, setIsCheckingVote] = useState(true);
+
+  const [isChangingVotes, setIsChangingVotes] = useState(false);
+  const [changeVotesError, setChangeVotesError] = useState("");
+
   useEffect(() => {
     async function checkExistingVote() {
       try {
@@ -65,7 +72,7 @@ export default function Home() {
       }
     }
 
-    checkExistingVote();
+    void checkExistingVote();
   }, []);
 
   useEffect(() => {
@@ -85,7 +92,10 @@ export default function Home() {
       if (songsResponse.error) {
         console.error(
           "Fehler beim Laden der Songs:",
-          songsResponse.error,
+          songsResponse.error.message,
+          songsResponse.error.code,
+          songsResponse.error.details,
+          songsResponse.error.hint,
         );
         return;
       }
@@ -93,7 +103,10 @@ export default function Home() {
       if (setlistResponse.error) {
         console.error(
           "Fehler beim Laden der Setlist:",
-          setlistResponse.error,
+          setlistResponse.error.message,
+          setlistResponse.error.code,
+          setlistResponse.error.details,
+          setlistResponse.error.hint,
         );
         return;
       }
@@ -137,7 +150,7 @@ export default function Home() {
       const normalizedTitle = normalizeSearchText(song.title);
       const normalizedArtist = normalizeSearchText(song.artist);
       const normalizedCombined = normalizeSearchText(
-        `${song.title} ${song.artist}`
+        `${song.title} ${song.artist}`,
       );
 
       return (
@@ -149,7 +162,9 @@ export default function Home() {
   }, [songs, searchTerm]);
 
   const selectedSongs = useMemo(() => {
-    return songs.filter((song) => selectedSongIds.includes(song.id));
+    return songs.filter((song) =>
+      selectedSongIds.includes(song.id),
+    );
   }, [songs, selectedSongIds]);
 
   function toggleSong(songId: number) {
@@ -217,8 +232,9 @@ export default function Home() {
         throw insertError;
       }
 
-      // Verhindert auch ohne erneutes Laden der Seite
-      // eine weitere Abstimmung.
+      // Die Auswahl für die Danke-Seite merken,
+      // bevor selectedSongIds geleert wird.
+      setSubmittedSongs(selectedSongs);
       setHasAlreadyVoted(true);
       setSelectedSongIds([]);
       setScreen("thanks");
@@ -262,11 +278,76 @@ export default function Home() {
     }
   }
 
+  async function changeVotes() {
+    if (isChangingVotes) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Möchtest du deine bisherige Auswahl löschen und neu abstimmen?",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsChangingVotes(true);
+    setChangeVotesError("");
+
+    try {
+      const concertId = await getActiveConcertId();
+      const deviceId = getDeviceId();
+
+      const { error } = await supabase
+        .from("votes")
+        .delete()
+        .eq("concert_id", concertId)
+        .eq("device_id", deviceId);
+
+      if (error) {
+        console.error(
+          "Stimmen konnten nicht zurückgenommen werden:",
+          error.message,
+          error.code,
+          error.details,
+          error.hint,
+        );
+
+        setChangeVotesError(
+          "Deine Auswahl konnte nicht zurückgenommen werden.",
+        );
+        return;
+      }
+
+      setSelectedSongIds([]);
+      setSubmittedSongs([]);
+      setSearchTerm("");
+      setSubmitError("");
+      setChangeVotesError("");
+      setHasAlreadyVoted(false);
+      setScreen("vote");
+    } catch (error) {
+      console.error(
+        "Fehler beim Ändern der Abstimmung:",
+        error,
+      );
+
+      setChangeVotesError(
+        "Aktuell konnte deine Auswahl nicht geändert werden.",
+      );
+    } finally {
+      setIsChangingVotes(false);
+    }
+  }
+
   if (isCheckingVote) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 pb-28 text-white">
-        <p className="text-zinc-400">Abstimmung wird geladen...</p>
-       <PublicNavigation /> 
+        <p className="text-zinc-400">
+          Abstimmung wird geladen...
+        </p>
+
+        <PublicNavigation />
       </main>
     );
   }
@@ -281,37 +362,59 @@ export default function Home() {
 
           <h1 className="mt-6 text-3xl font-black sm:text-4xl">
             Du hast bereits abgestimmt!
-            <div className="mt-8 flex flex-col items-center gap-3">
-              <p className="text-sm text-zinc-500">Weitere Infos:</p>
-
-              <a
-                href="https://www.instagram.com/nofrontband/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-3 rounded-xl border border-pink-500/30 bg-pink-500/10 px-5 py-3 font-semibold text-pink-300 transition hover:border-pink-400 hover:bg-pink-500/20 hover:text-pink-200"
-                aria-label="No Front auf Instagram öffnen"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                  className="h-6 w-6 fill-current"
-                >
-                  <path d="M7.75 2h8.5A5.76 5.76 0 0 1 22 7.75v8.5A5.76 5.76 0 0 1 16.25 22h-8.5A5.76 5.76 0 0 1 2 16.25v-8.5A5.76 5.76 0 0 1 7.75 2Zm0 2A3.75 3.75 0 0 0 4 7.75v8.5A3.75 3.75 0 0 0 7.75 20h8.5A3.75 3.75 0 0 0 20 16.25v-8.5A3.75 3.75 0 0 0 16.25 4h-8.5ZM17.5 5.5a1 1 0 1 1 0 2 1 1 0 0 1 0-2ZM12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z" />
-                </svg>
-
-                
-              </a>
-            </div>
           </h1>
 
           <p className="mt-4 text-zinc-300">
             Vielen Dank. Deine drei Wünsche wurden gespeichert.
           </p>
+
+          <button
+            type="button"
+            onClick={changeVotes}
+            disabled={isChangingVotes}
+            className="mt-6 w-full rounded-2xl border border-white/15 bg-zinc-900 px-6 py-4 font-black text-white transition hover:border-red-500 hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-60"
+          >
+            {isChangingVotes
+              ? "Auswahl wird zurückgesetzt …"
+              : "← Auswahl ändern"}
+          </button>
+
+          {changeVotesError && (
+            <p className="mt-4 text-sm font-semibold text-red-300">
+              {changeVotesError}
+            </p>
+          )}
+
+          <div className="mt-8 flex flex-col items-center gap-3">
+            <p className="text-sm text-zinc-500">
+              Weitere Infos:
+            </p>
+
+            <a
+              href="https://www.instagram.com/nofrontband/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 rounded-xl border border-pink-500/30 bg-pink-500/10 px-5 py-3 font-semibold text-pink-300 transition hover:border-pink-400 hover:bg-pink-500/20 hover:text-pink-200"
+              aria-label="No Front auf Instagram öffnen"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                className="h-6 w-6 fill-current"
+              >
+                <path d="M7.75 2h8.5A5.76 5.76 0 0 1 22 7.75v8.5A5.76 5.76 0 0 1 16.25 22h-8.5A5.76 5.76 0 0 1 2 16.25v-8.5A5.76 5.76 0 0 1 7.75 2Zm0 2A3.75 3.75 0 0 0 4 7.75v8.5A3.75 3.75 0 0 0 7.75 20h8.5A3.75 3.75 0 0 0 20 16.25v-8.5A3.75 3.75 0 0 0 16.25 4h-8.5ZM17.5 5.5a1 1 0 1 1 0 2 1 1 0 0 1 0-2ZM12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z" />
+              </svg>
+
+              <span>@nofrontband</span>
+            </a>
+          </div>
         </section>
-       <PublicNavigation /> 
+
+        <PublicNavigation />
       </main>
     );
   }
+
   if (screen === "landing") {
     return (
       <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 pb-28 text-white">
@@ -329,7 +432,8 @@ export default function Home() {
           </h1>
 
           <p className="mx-auto mt-6 max-w-md text-lg leading-relaxed text-zinc-300">
-            Heute entscheidest du mit, welche Songs wir auf der Bühne spielen.
+            Heute entscheidest du mit, welche Songs wir auf der
+            Bühne spielen.
           </p>
 
           <p className="mt-3 text-zinc-500">
@@ -348,14 +452,15 @@ export default function Home() {
             Die Band entscheidet über die endgültige Setlist.
           </p>
         </section>
-       <PublicNavigation /> 
+
+        <PublicNavigation />
       </main>
     );
   }
 
   if (screen === "thanks") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 pb-28text-white">
+      <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 pb-28 text-white">
         <section className="w-full max-w-xl rounded-3xl border border-green-500/30 bg-green-950/20 p-8 text-center shadow-2xl">
           <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green-500 text-4xl font-black">
             ✓
@@ -369,25 +474,46 @@ export default function Home() {
             Deine Stimmen wurden gespeichert.
           </p>
 
-          <ul className="mt-7 space-y-3">
-            {selectedSongs.map((song) => (
-              <li
-                key={song.id}
-                className="rounded-2xl border border-white/10 bg-black/30 px-5 py-4 text-left"
-              >
-                <p className="font-bold">{song.title}</p>
-                <p className="mt-1 text-sm text-zinc-400">{song.artist}</p>
-              </li>
-            ))}
-          </ul>
+          {submittedSongs.length > 0 && (
+            <ul className="mt-7 space-y-3">
+              {submittedSongs.map((song) => (
+                <li
+                  key={song.id}
+                  className="rounded-2xl border border-white/10 bg-black/30 px-5 py-4 text-left"
+                >
+                  <p className="font-bold">{song.title}</p>
+                  <p className="mt-1 text-sm text-zinc-400">
+                    {song.artist}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
 
           <p className="mt-7 text-sm leading-relaxed text-zinc-400">
-            Deine Auswahl hilft uns dabei, die Setlist für den Abend
-            zusammenzustellen.
+            Deine Auswahl hilft uns dabei, die Setlist für den
+            Abend zusammenzustellen.
           </p>
 
+          <button
+            type="button"
+            onClick={changeVotes}
+            disabled={isChangingVotes}
+            className="mt-6 w-full rounded-2xl border border-white/15 bg-zinc-900 px-6 py-4 font-black text-white transition hover:border-red-500 hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-60"
+          >
+            {isChangingVotes
+              ? "Auswahl wird zurückgesetzt …"
+              : "← Auswahl ändern"}
+          </button>
+
+          {changeVotesError && (
+            <p className="mt-4 text-sm font-semibold text-red-300">
+              {changeVotesError}
+            </p>
+          )}
         </section>
-      <PublicNavigation />
+
+        <PublicNavigation />
       </main>
     );
   }
@@ -411,7 +537,10 @@ export default function Home() {
 
         <div className="sticky top-3 z-10 mt-8 flex items-center justify-between rounded-2xl border border-white/10 bg-zinc-900/95 p-5 shadow-xl backdrop-blur">
           <div>
-            <p className="text-sm text-zinc-400">Deine Auswahl</p>
+            <p className="text-sm text-zinc-400">
+              Deine Auswahl
+            </p>
+
             <p className="mt-1 text-lg font-bold">
               {selectedSongIds.length} von 3 Songs
             </p>
@@ -421,10 +550,11 @@ export default function Home() {
             {[1, 2, 3].map((number) => (
               <span
                 key={number}
-                className={`h-3 w-3 rounded-full ${selectedSongIds.length >= number
-                  ? "bg-red-500"
-                  : "bg-zinc-700"
-                  }`}
+                className={`h-3 w-3 rounded-full ${
+                  selectedSongIds.length >= number
+                    ? "bg-red-500"
+                    : "bg-zinc-700"
+                }`}
               />
             ))}
           </div>
@@ -434,7 +564,9 @@ export default function Home() {
           <input
             type="search"
             value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
+            onChange={(event) =>
+              setSearchTerm(event.target.value)
+            }
             placeholder="Song oder Künstler suchen..."
             className="w-full rounded-2xl border border-white/10 bg-zinc-900 px-5 py-4 text-white outline-none placeholder:text-zinc-500 focus:border-red-500"
           />
@@ -443,6 +575,7 @@ export default function Home() {
         <div className="mt-5 space-y-3">
           {filteredSongs.map((song) => {
             const isSelected = selectedSongIds.includes(song.id);
+
             const selectionIsFull =
               selectedSongIds.length >= 3 && !isSelected;
 
@@ -452,25 +585,30 @@ export default function Home() {
                 type="button"
                 onClick={() => toggleSong(song.id)}
                 disabled={selectionIsFull || isSubmitting}
-                className={`flex w-full items-center justify-between rounded-2xl border px-5 py-4 text-left transition ${isSelected
-                  ? "border-red-500 bg-red-600/20"
-                  : selectionIsFull
-                    ? "cursor-not-allowed border-white/5 bg-zinc-900/40 text-zinc-600"
-                    : "border-white/10 bg-zinc-900 hover:border-white/30 hover:bg-zinc-800"
-                  }`}
+                className={`flex w-full items-center justify-between rounded-2xl border px-5 py-4 text-left transition ${
+                  isSelected
+                    ? "border-red-500 bg-red-600/20"
+                    : selectionIsFull
+                      ? "cursor-not-allowed border-white/5 bg-zinc-900/40 text-zinc-600"
+                      : "border-white/10 bg-zinc-900 hover:border-white/30 hover:bg-zinc-800"
+                }`}
               >
                 <span>
-                  <span className="block font-bold">{song.title}</span>
+                  <span className="block font-bold">
+                    {song.title}
+                  </span>
+
                   <span className="mt-1 block text-sm text-zinc-400">
                     {song.artist}
                   </span>
                 </span>
 
                 <span
-                  className={`flex h-8 w-8 items-center justify-center rounded-full border font-bold ${isSelected
-                    ? "border-red-500 bg-red-500"
-                    : "border-zinc-600 text-transparent"
-                    }`}
+                  className={`flex h-8 w-8 items-center justify-center rounded-full border font-bold ${
+                    isSelected
+                      ? "border-red-500 bg-red-500"
+                      : "border-zinc-600 text-transparent"
+                  }`}
                 >
                   ✓
                 </span>
@@ -494,10 +632,14 @@ export default function Home() {
         <button
           type="button"
           onClick={submitVotes}
-          disabled={selectedSongIds.length !== 3 || isSubmitting}
+          disabled={
+            selectedSongIds.length !== 3 || isSubmitting
+          }
           className="mt-7 w-full rounded-2xl bg-red-600 px-6 py-5 text-xl font-black transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-400"
         >
-          {isSubmitting ? "Wünsche werden gespeichert..." : "Abstimmen"}
+          {isSubmitting
+            ? "Wünsche werden gespeichert..."
+            : "Abstimmen"}
         </button>
 
         <button
@@ -509,7 +651,8 @@ export default function Home() {
           Zurück zur Startseite
         </button>
       </section>
-    <PublicNavigation />  
+
+      <PublicNavigation />
     </main>
   );
 }
