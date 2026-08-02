@@ -40,6 +40,11 @@ type SetlistItem = {
 };
 
 type SetlistView = "live" | "builder";
+type SavedSetlist = {
+    id: number;
+    name: string;
+    created_at: string;
+};
 
 export default function SetlistPage() {
     const [view, setView] = useState<SetlistView>("live");
@@ -58,6 +63,14 @@ export default function SetlistPage() {
     const [songsWithPdf, setSongsWithPdf] = useState<Set<number>>(
         new Set(),
     );
+    const [savedSetlists, setSavedSetlists] = useState<SavedSetlist[]>([]);
+    const [isSavingSetlist, setIsSavingSetlist] = useState(false);
+    const [isLoadDialogOpen, setIsLoadDialogOpen] = useState(false);
+    const [isLoadingSavedSetlists, setIsLoadingSavedSetlists] =
+        useState(false);
+    const [loadingSavedSetlistId, setLoadingSavedSetlistId] =
+        useState<number | null>(null);
+    const [savedSetlistMessage, setSavedSetlistMessage] = useState("");
 
     useEffect(() => {
         loadSongs();
@@ -115,7 +128,6 @@ export default function SetlistPage() {
             supabase
                 .from("song_pdfs")
                 .select("song_id")
-                .eq("user_id", user.id),
         ]);
 
         if (setlistResponse.error) {
@@ -201,13 +213,23 @@ export default function SetlistPage() {
                     error.details,
                     error.hint,
                 );
+
+                // Den bisherigen LIVE-Status bei einem Ladefehler behalten.
                 return;
             }
 
-            setCurrentSongId(data?.song_id ?? null);
-        } catch {
-            // Ohne aktives Konzert ist noch kein Song ausgewählt.
-            setCurrentSongId(null);
+            // Nur überschreiben, wenn wirklich eine gültige Song-ID
+            // aus der Datenbank zurückkommt.
+            if (typeof data?.song_id === "number") {
+                setCurrentSongId(data.song_id);
+            }
+        } catch (error) {
+            console.error(
+                "Aktueller Song konnte nicht aktualisiert werden:",
+                error,
+            );
+
+            // Den bisherigen LIVE-Status nicht auf null zurücksetzen.
         }
     }
 
@@ -548,6 +570,135 @@ export default function SetlistPage() {
         return searchableSong.includes(normalizedSongSearch);
     });
 
+    async function saveCurrentSetlist() {
+        if (setlist.length === 0) {
+            setSavedSetlistMessage(
+                "Die aktuelle Setlist ist leer und kann nicht gespeichert werden.",
+            );
+            return;
+        }
+
+        const enteredName = window.prompt(
+            "Wie soll die Setlist heißen?",
+            `Setlist ${new Date().toLocaleDateString("de-DE")}`,
+        );
+
+        const setlistName = enteredName?.trim();
+
+        if (!setlistName) {
+            return;
+        }
+
+        setIsSavingSetlist(true);
+        setSavedSetlistMessage("");
+
+        const { error } = await supabase.rpc(
+            "save_current_setlist",
+            {
+                p_name: setlistName,
+            },
+        );
+
+        if (error) {
+            console.error(
+                "Setlist konnte nicht gespeichert werden:",
+                error.message,
+                error.code,
+                error.details,
+                error.hint,
+            );
+
+            setSavedSetlistMessage(
+                "Die Setlist konnte nicht gespeichert werden.",
+            );
+            setIsSavingSetlist(false);
+            return;
+        }
+
+        setSavedSetlistMessage(
+            `„${setlistName}“ wurde erfolgreich gespeichert.`,
+        );
+        setIsSavingSetlist(false);
+    }
+
+    async function openSavedSetlists() {
+        setIsLoadDialogOpen(true);
+        setIsLoadingSavedSetlists(true);
+        setSavedSetlistMessage("");
+
+        const { data, error } = await supabase
+            .from("saved_setlists")
+            .select("id, name, created_at")
+            .order("created_at", { ascending: false });
+
+        if (error) {
+            console.error(
+                "Gespeicherte Setlists konnten nicht geladen werden:",
+                error.message,
+                error.code,
+                error.details,
+                error.hint,
+            );
+
+            setSavedSetlistMessage(
+                "Die gespeicherten Setlists konnten nicht geladen werden.",
+            );
+            setSavedSetlists([]);
+            setIsLoadingSavedSetlists(false);
+            return;
+        }
+
+        setSavedSetlists((data ?? []) as SavedSetlist[]);
+        setIsLoadingSavedSetlists(false);
+    }
+
+    async function loadSavedSetlist(
+        savedSetlist: SavedSetlist,
+    ) {
+        const confirmed = window.confirm(
+            `Möchtest du „${savedSetlist.name}“ laden?\n\nDie aktuelle Setlist wird dadurch vollständig ersetzt.`,
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        setLoadingSavedSetlistId(savedSetlist.id);
+        setSavedSetlistMessage("");
+
+        const { error } = await supabase.rpc(
+            "load_saved_setlist",
+            {
+                p_saved_setlist_id: savedSetlist.id,
+            },
+        );
+
+        if (error) {
+            console.error(
+                "Gespeicherte Setlist konnte nicht geladen werden:",
+                error.message,
+                error.code,
+                error.details,
+                error.hint,
+            );
+
+            setSavedSetlistMessage(
+                "Die gespeicherte Setlist konnte nicht geladen werden.",
+            );
+            setLoadingSavedSetlistId(null);
+            return;
+        }
+
+        await loadSetlist();
+
+        setSavedSetlistMessage(
+            `„${savedSetlist.name}“ wurde als aktuelle Setlist geladen.`,
+        );
+
+        setLoadingSavedSetlistId(null);
+        setIsLoadDialogOpen(false);
+    }
+
     return (
         <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-8 text-white sm:px-8">
             <div className="mx-auto max-w-6xl">
@@ -641,19 +792,29 @@ export default function SetlistPage() {
                 ) : (
                     <section className="mt-8">
                         <div className="mb-5">
-                            <h2 className="text-2xl font-black">
-                                Setlist-Baukasten
-                            </h2>
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                    <h2 className="text-2xl font-black">
+                                        Setlist-Baukasten
+                                    </h2>
 
-                            <p className="mt-2 text-zinc-400">
-                                Stelle hier deine Live-Setlist zusammen.
-                            </p>
+                                    <p className="mt-2 text-zinc-400">
+                                        Stelle hier deine Live-Setlist zusammen.
+                                    </p>
+                                </div>
+                            </div>
+
+                            {savedSetlistMessage && (
+                                <p className="mt-4 rounded-xl border border-white/10 bg-zinc-900 px-4 py-3 text-sm text-zinc-200">
+                                    {savedSetlistMessage}
+                                </p>
+                            )}
                         </div>
 
                         <div className="grid gap-6 lg:grid-cols-2">
 
                             <section className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5">
-                                <div className="mb-5 flex items-start justify-between gap-4">
+                                <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                                     <div>
                                         <h3 className="text-2xl font-bold">
                                             Aktuelle Setlist
@@ -666,13 +827,39 @@ export default function SetlistPage() {
                                         </p>
                                     </div>
 
-                                    <button
-                                        type="button"
-                                        onClick={addRequestPlaceholder}
-                                        className="shrink-0 rounded-xl bg-amber-500 px-4 py-3 font-black text-black transition hover:bg-amber-400"
-                                    >
-                                        + Wunschsong
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => void saveCurrentSetlist()}
+                                            disabled={
+                                                isSavingSetlist ||
+                                                setlist.length === 0
+                                            }
+                                            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-zinc-700 text-xl transition hover:bg-zinc-600 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-600"
+                                            title="Aktuelle Setlist speichern"
+                                            aria-label="Aktuelle Setlist speichern"
+                                        >
+                                            {isSavingSetlist ? "…" : "💾"}
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={() => void openSavedSetlists()}
+                                            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-zinc-700 text-xl transition hover:bg-zinc-600"
+                                            title="Gespeicherte Setlist laden"
+                                            aria-label="Gespeicherte Setlist laden"
+                                        >
+                                            📂
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={addRequestPlaceholder}
+                                            className="h-12 shrink-0 rounded-xl bg-amber-500 px-4 font-black text-black transition hover:bg-amber-400"
+                                        >
+                                            + Wunschsong
+                                        </button>
+                                    </div>
                                 </div>
 
                                 {setlist.length === 0 ? (
@@ -786,6 +973,99 @@ export default function SetlistPage() {
                     </section>
                 )}
             </div>
+
+            {isLoadDialogOpen && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4">
+                    <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/10 bg-zinc-950 p-6 shadow-2xl">
+                        <div className="flex items-start justify-between gap-4">
+                            <div>
+                                <h2 className="text-2xl font-black">
+                                    Gespeicherte Setlist laden
+                                </h2>
+
+                                <p className="mt-2 text-sm text-zinc-400">
+                                    Beim Laden wird die
+                                    aktuelle Setlist vollständig
+                                    ersetzt.
+                                </p>
+                            </div>
+
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    setIsLoadDialogOpen(false)
+                                }
+                                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-zinc-800 text-xl font-black hover:bg-zinc-700"
+                                aria-label="Fenster schließen"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <div className="mt-6 space-y-3">
+                            {isLoadingSavedSetlists ? (
+                                <p className="rounded-2xl bg-zinc-900 p-5 text-zinc-400">
+                                    Gespeicherte Setlists
+                                    werden geladen …
+                                </p>
+                            ) : savedSetlists.length === 0 ? (
+                                <p className="rounded-2xl bg-zinc-900 p-5 text-zinc-400">
+                                    Es wurde noch keine
+                                    Setlist gespeichert.
+                                </p>
+                            ) : (
+                                savedSetlists.map(
+                                    (savedSetlist) => (
+                                        <article
+                                            key={
+                                                savedSetlist.id
+                                            }
+                                            className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-zinc-900 p-5 sm:flex-row sm:items-center sm:justify-between"
+                                        >
+                                            <div className="min-w-0">
+                                                <h3 className="break-words text-lg font-black text-white">
+                                                    {
+                                                        savedSetlist.name
+                                                    }
+                                                </h3>
+
+                                                <p className="mt-1 text-sm text-zinc-400">
+                                                    Gespeichert
+                                                    am{" "}
+                                                    {new Date(
+                                                        savedSetlist.created_at,
+                                                    ).toLocaleString(
+                                                        "de-DE",
+                                                    )}
+                                                </p>
+                                            </div>
+
+                                            <button
+                                                type="button"
+                                                onClick={() =>
+                                                    void loadSavedSetlist(
+                                                        savedSetlist,
+                                                    )
+                                                }
+                                                disabled={
+                                                    loadingSavedSetlistId !==
+                                                    null
+                                                }
+                                                className="shrink-0 rounded-xl bg-blue-600 px-5 py-3 font-black text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-700"
+                                            >
+                                                {loadingSavedSetlistId ===
+                                                    savedSetlist.id
+                                                    ? "Wird geladen …"
+                                                    : "Diese Setlist laden"}
+                                            </button>
+                                        </article>
+                                    ),
+                                )
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </main>
     );
 }

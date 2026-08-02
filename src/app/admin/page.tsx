@@ -51,6 +51,10 @@ export default function AdminPage() {
   const [isEndingConcert, setIsEndingConcert] =
     useState(false);
 
+  const [songsInSetlist, setSongsInSetlist] = useState<Set<number>>(
+    new Set(),
+  );
+
   const checkConcertStatus = useCallback(async () => {
     const { data, error } = await supabase
       .from("concerts")
@@ -70,6 +74,8 @@ export default function AdminPage() {
       setIsConcertActive(false);
       return;
     }
+
+
 
     setIsConcertActive(Boolean(data));
   }, []);
@@ -265,6 +271,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     loadVotes();
+    loadSongsInSetlist();
 
     const intervalId = window.setInterval(() => {
       loadVotes();
@@ -438,15 +445,48 @@ export default function AdminPage() {
     }
   }
 
-  async function setCurrentSong(song: VoteResult) {
+  async function loadSongsInSetlist() {
+    const { data, error } = await supabase
+      .from("setlist_items")
+      .select("assigned_song_id")
+      .eq("item_type", "request")
+      .not("assigned_song_id", "is", null);
+
+    if (error) {
+      console.error(
+        "Zugewiesene Wunschsongs konnten nicht geladen werden:",
+        error.message,
+        error.code,
+        error.details,
+        error.hint,
+      );
+      return;
+    }
+
+    const assignedSongIds = new Set<number>();
+
+    for (const item of data ?? []) {
+      if (typeof item.assigned_song_id === "number") {
+        assignedSongIds.add(item.assigned_song_id);
+      }
+    }
+
+    setSongsInSetlist(assignedSongIds);
+  }
+
+  async function addRequestToSetlist(song: VoteResult) {
+    if (
+      changingSongId !== null ||
+      songsInSetlist.has(song.songId)
+    ) {
+      return;
+    }
+
     setChangingSongId(song.songId);
     setErrorMessage("");
 
     try {
-      const concertId = await getActiveConcertId();
-
-      // Prüfen, ob dieser Publikumswunsch bereits einem
-      // Wunschsong-Platzhalter zugewiesen wurde.
+      // Kontrollieren, ob der Song bereits zugewiesen wurde.
       const { data: existingRequest, error: existingRequestError } =
         await supabase
           .from("setlist_items")
@@ -458,127 +498,100 @@ export default function AdminPage() {
       if (existingRequestError) {
         console.error(
           "Fehler beim Prüfen des Wunschsongs:",
-          existingRequestError,
+          existingRequestError.message,
+          existingRequestError.code,
+          existingRequestError.details,
+          existingRequestError.hint,
         );
 
         setErrorMessage(
           "Der Wunschsong konnte nicht geprüft werden.",
         );
-
-        setChangingSongId(null);
         return;
       }
 
-      let setlistItemId: number;
-
       if (existingRequest) {
-        // Der Song wurde bereits einem Platzhalter zugewiesen.
-        setlistItemId = existingRequest.id;
-      } else {
-        // Den ersten freien Wunschsong-Platzhalter suchen.
-        const { data: freeRequest, error: freeRequestError } =
-          await supabase
-            .from("setlist_items")
-            .select("id")
-            .eq("item_type", "request")
-            .is("assigned_song_id", null)
-            .order("position", { ascending: true })
-            .limit(1)
-            .maybeSingle();
-
-        if (freeRequestError) {
-          console.error(
-            "Fehler beim Suchen eines freien Wunschsongs:",
-            freeRequestError,
-          );
-
-          setErrorMessage(
-            "Ein freier Wunschsong-Platzhalter konnte nicht gesucht werden.",
-          );
-
-          setChangingSongId(null);
-          return;
-        }
-
-        if (!freeRequest) {
-          setErrorMessage(
-            "Es gibt keinen freien Wunschsong-Platzhalter in der Setlist.",
-          );
-
-          setChangingSongId(null);
-          return;
-        }
-
-        const { error: assignError } = await supabase
-          .from("setlist_items")
-          .update({
-            assigned_song_id: song.songId,
-          })
-          .eq("id", freeRequest.id);
-
-        if (assignError) {
-          console.error(
-            "Fehler beim Füllen des Wunschsong-Platzhalters:",
-            assignError,
-          );
-
-          setErrorMessage(
-            "Der Song konnte nicht in die Setlist übernommen werden.",
-          );
-
-          setChangingSongId(null);
-          return;
-        }
-
-        setlistItemId = freeRequest.id;
+        setSongsInSetlist((currentIds) => {
+          const updatedIds = new Set(currentIds);
+          updatedIds.add(song.songId);
+          return updatedIds;
+        });
+        return;
       }
 
-      // Den zugewiesenen Setlist-Eintrag als aktuellen Song speichern.
-      const { error: currentSongError } = await supabase
-        .from("current_song")
-        .upsert(
-          {
-            concert_id: concertId,
-            setlist_item_id: setlistItemId,
-            song_id: song.songId,
-            song_title: song.songTitle,
-            artist: song.artist,
-            updated_at: new Date().toISOString(),
-          },
-          {
-            onConflict: "concert_id",
-          },
-        );
+      // Den ersten noch freien Wunschsong-Platzhalter suchen.
+      const { data: freeRequest, error: freeRequestError } =
+        await supabase
+          .from("setlist_items")
+          .select("id")
+          .eq("item_type", "request")
+          .is("assigned_song_id", null)
+          .order("position", { ascending: true })
+          .limit(1)
+          .maybeSingle();
 
-      if (currentSongError) {
+      if (freeRequestError) {
         console.error(
-          "Fehler beim Setzen des aktuellen Songs:",
-          currentSongError.message,
-          currentSongError.code,
-          currentSongError.details,
-          currentSongError.hint,
+          "Fehler beim Suchen eines freien Wunschsongs:",
+          freeRequestError.message,
+          freeRequestError.code,
+          freeRequestError.details,
+          freeRequestError.hint,
         );
 
         setErrorMessage(
-          "Der aktuelle Song konnte nicht gespeichert werden.",
+          "Ein freier Wunschsong-Platzhalter konnte nicht gesucht werden.",
         );
-
-        setChangingSongId(null);
         return;
       }
 
-      setCurrentSongId(song.songId);
-      setChangingSongId(null);
+      if (!freeRequest) {
+        setErrorMessage(
+          "Es gibt keinen freien Wunschsong-Platzhalter in der Setlist.",
+        );
+        return;
+      }
+
+      // Den Publikumswunsch in den freien Platz eintragen.
+      const { error: assignError } = await supabase
+        .from("setlist_items")
+        .update({
+          assigned_song_id: song.songId,
+        })
+        .eq("id", freeRequest.id);
+
+      if (assignError) {
+        console.error(
+          "Fehler beim Einfügen des Wunschsongs:",
+          assignError.message,
+          assignError.code,
+          assignError.details,
+          assignError.hint,
+        );
+
+        setErrorMessage(
+          "Der Wunschsong konnte nicht in die Setlist übernommen werden.",
+        );
+        return;
+      }
+
+      setSongsInSetlist((currentIds) => {
+        const updatedIds = new Set(currentIds);
+        updatedIds.add(song.songId);
+        return updatedIds;
+      });
+
+      await loadSongsInSetlist();
     } catch (error) {
       console.error(
-        "Fehler beim Laden des aktiven Konzerts:",
+        "Fehler beim Hinzufügen des Wunschsongs:",
         error,
       );
 
       setErrorMessage(
-        "Das aktive Konzert konnte nicht gefunden werden.",
+        "Der Wunschsong konnte nicht hinzugefügt werden.",
       );
-
+    } finally {
       setChangingSongId(null);
     }
   }
@@ -945,30 +958,37 @@ export default function AdminPage() {
                         </div>
                       </div>
 
-                      <div className="flex flex-col gap-2">
+                      <div className="flex w-28 shrink-0 flex-col gap-2">
                         <button
                           type="button"
-                          onClick={() => setCurrentSong(song)}
-                          disabled={isChanging}
-                          className={`rounded-xl px-5 py-3 font-black transition ${currentSongId === song.songId
-                            ? "bg-blue-700"
-                            : "bg-blue-600 hover:bg-blue-500"
+                          onClick={() => void addRequestToSetlist(song)}
+                          disabled={
+                            isChanging || songsInSetlist.has(song.songId)
+                          }
+                          className={`min-h-16 w-28 rounded-xl px-3 py-3 text-center text-sm font-black leading-tight transition ${songsInSetlist.has(song.songId)
+                              ? "cursor-default border border-green-500/40 bg-green-950 text-green-300"
+                              : "bg-amber-500 text-black hover:bg-amber-400 disabled:cursor-wait disabled:opacity-60"
                             }`}
                         >
-                          {currentSongId === song.songId
-                            ? "🎤 Läuft gerade"
-                            : "🎤 Jetzt spielen"}
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => markAsPlayed(song)}
-                          disabled={isChanging}
-                          className="rounded-xl bg-green-600 px-5 py-3 font-black transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-400"
-                        >
-                          {isChanging
-                            ? "Wird gespeichert …"
-                            : "✓ Gespielt"}
+                          {isChanging ? (
+                            <>
+                              Wird
+                              <br />
+                              hinzugefügt …
+                            </>
+                          ) : songsInSetlist.has(song.songId) ? (
+                            <>
+                              ✓ In der
+                              <br />
+                              Setlist
+                            </>
+                          ) : (
+                            <>
+                              Zur Setlist
+                              <br />
+                              hinzufügen
+                            </>
+                          )}
                         </button>
                       </div>
                     </div>

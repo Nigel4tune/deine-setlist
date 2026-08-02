@@ -161,14 +161,14 @@ function SortableItem({
                 : "Song jetzt spielen"
           }
           aria-label={`${item.title} jetzt spielen`}
-          className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border text-xl font-black transition ${isCurrentSong
+          className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border text-xs font-black transition ${isCurrentSong
             ? "border-red-400 bg-red-600 text-white"
             : canPlay
               ? "border-blue-500/50 bg-blue-600 text-white hover:bg-blue-500"
               : "cursor-not-allowed border-white/10 bg-zinc-800 text-zinc-600 opacity-50"
             }`}
         >
-          {isChangingSong ? "…" : "▶"}
+          {isChangingSong ? "…" : isCurrentSong ? "LIVE" : "▶"}
         </button>
       )}
 

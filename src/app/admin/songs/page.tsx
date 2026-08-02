@@ -11,6 +11,7 @@ import {
     Trash2,
     FileUp,
 } from "lucide-react";
+import PdfShareButton from "../../components/PdfShareButton";
 
 type Song = {
     id: number;
@@ -45,6 +46,8 @@ export default function AdminSongsPage() {
     const [songsWithPdf, setSongsWithPdf] = useState<Set<number>>(
         new Set(),
     );
+    const [availablePdfSongIds, setAvailablePdfSongIds] =
+        useState<Set<number>>(new Set());
 
     useEffect(() => {
         async function loadSongs() {
@@ -60,16 +63,27 @@ export default function AdminSongsPage() {
                 return;
             }
 
-            const [songsResponse, pdfsResponse] = await Promise.all([
+            const [
+                songsResponse,
+                ownPdfsResponse,
+                availablePdfsResponse,
+            ] = await Promise.all([
                 supabase
                     .from("songs")
                     .select("id, title, artist, is_active")
                     .order("title"),
 
+                // Nur meine eigenen PDFs
                 supabase
                     .from("song_pdfs")
                     .select("song_id")
                     .eq("user_id", user.id),
+
+                // Eigene und für mich freigegebene PDFs.
+                // Welche Zeilen sichtbar sind, regelt Supabase über RLS.
+                supabase
+                    .from("song_pdfs")
+                    .select("song_id"),
             ]);
 
             if (songsResponse.error) {
@@ -86,14 +100,28 @@ export default function AdminSongsPage() {
                 return;
             }
 
-            if (pdfsResponse.error) {
+            if (ownPdfsResponse.error) {
                 console.error(
-                    "Fehler beim Laden der PDFs:",
-                    pdfsResponse.error,
+                    "Fehler beim Laden der eigenen PDFs:",
+                    ownPdfsResponse.error,
                 );
 
                 setErrorMessage(
-                    "Der PDF-Status konnte nicht geladen werden.",
+                    "Die eigenen PDFs konnten nicht geladen werden.",
+                );
+
+                setLoading(false);
+                return;
+            }
+
+            if (availablePdfsResponse.error) {
+                console.error(
+                    "Fehler beim Laden der verfügbaren PDFs:",
+                    availablePdfsResponse.error,
+                );
+
+                setErrorMessage(
+                    "Die geteilten PDFs konnten nicht geladen werden.",
                 );
 
                 setLoading(false);
@@ -104,7 +132,15 @@ export default function AdminSongsPage() {
 
             setSongsWithPdf(
                 new Set(
-                    (pdfsResponse.data ?? []).map(
+                    (ownPdfsResponse.data ?? []).map(
+                        (pdf) => pdf.song_id,
+                    ),
+                ),
+            );
+
+            setAvailablePdfSongIds(
+                new Set(
+                    (availablePdfsResponse.data ?? []).map(
                         (pdf) => pdf.song_id,
                     ),
                 ),
@@ -187,10 +223,10 @@ export default function AdminSongsPage() {
             }
 
             setSongsWithPdf((current) => {
-    const updated = new Set(current);
-    updated.add(song.id);
-    return updated;
-});
+                const updated = new Set(current);
+                updated.add(song.id);
+                return updated;
+            });
             alert("PDF erfolgreich gespeichert.");
         } finally {
             setUploadingPdfSongId(null);
@@ -513,14 +549,27 @@ export default function AdminSongsPage() {
                                                                             ?.click()
                                                                     }
                                                                     disabled={uploadingPdfSongId === song.id}
-                                                                    className={`rounded-xl p-2 text-white transition disabled:opacity-50 ${songsWithPdf.has(song.id)
+                                                                    className={`rounded-xl p-2 text-white transition disabled:opacity-50 ${availablePdfSongIds.has(song.id)
                                                                             ? "bg-green-600 hover:bg-green-500"
                                                                             : "bg-red-600 hover:bg-red-500"
                                                                         }`}
-                                                                    title="PDF hochladen oder ersetzen"
+                                                                    title={
+                                                                        songsWithPdf.has(song.id)
+                                                                            ? "Eigene PDF hochladen oder ersetzen"
+                                                                            : availablePdfSongIds.has(song.id)
+                                                                                ? "Geteilte PDF vorhanden – eigene PDF hochladen"
+                                                                                : "PDF hochladen"
+                                                                    }
                                                                 >
                                                                     <FileUp size={18} />
                                                                 </button>
+
+                                                                <PdfShareButton
+                                                                    songId={song.id}
+                                                                    songTitle={song.title}
+                                                                    hasOwnPdf={songsWithPdf.has(song.id)}
+                                                                />
+
                                                             </>
                                                             <button
                                                                 type="button"
