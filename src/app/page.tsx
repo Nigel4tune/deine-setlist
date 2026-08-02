@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabase";
 import { getActiveConcertId } from "./lib/concert";
 import { getDeviceId } from "./lib/device";
+import PublicNavigation from "./components/PublicNavigation";
 
 type Screen = "landing" | "vote" | "thanks";
 
@@ -263,15 +264,16 @@ export default function Home() {
 
   if (isCheckingVote) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 text-white">
+      <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 pb-28 text-white">
         <p className="text-zinc-400">Abstimmung wird geladen...</p>
+       <PublicNavigation /> 
       </main>
     );
   }
 
   if (hasAlreadyVoted && screen !== "thanks") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 text-white">
+      <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 pb-28 text-white">
         <section className="w-full max-w-xl rounded-3xl border border-green-500/30 bg-green-950/20 p-8 text-center shadow-2xl">
           <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green-500 text-4xl font-black">
             ✓
@@ -306,12 +308,13 @@ export default function Home() {
             Vielen Dank. Deine drei Wünsche wurden gespeichert.
           </p>
         </section>
+       <PublicNavigation /> 
       </main>
     );
   }
   if (screen === "landing") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 text-white">
+      <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 pb-28 text-white">
         <section className="w-full max-w-xl text-center">
           <p className="mb-5 text-sm font-bold uppercase tracking-[0.35em] text-red-500">
             No Front präsentiert
@@ -345,13 +348,14 @@ export default function Home() {
             Die Band entscheidet über die endgültige Setlist.
           </p>
         </section>
+       <PublicNavigation /> 
       </main>
     );
   }
 
   if (screen === "thanks") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 text-white">
+      <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 pb-28text-white">
         <section className="w-full max-w-xl rounded-3xl border border-green-500/30 bg-green-950/20 p-8 text-center shadow-2xl">
           <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green-500 text-4xl font-black">
             ✓
@@ -383,12 +387,13 @@ export default function Home() {
           </p>
 
         </section>
+      <PublicNavigation />
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 text-white">
+    <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 pb-28 text-white">
       <section className="mx-auto w-full max-w-2xl">
         <header className="text-center">
           <p className="mb-3 text-sm font-bold uppercase tracking-[0.3em] text-red-500">
@@ -504,6 +509,7 @@ export default function Home() {
           Zurück zur Startseite
         </button>
       </section>
+    <PublicNavigation />  
     </main>
   );
 }

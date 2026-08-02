@@ -32,6 +32,9 @@ type Props = {
   onReorder: (songs: SetlistItem[]) => Promise<void>;
   onRemove?: (itemId: number) => void;
   onOpenPdf?: (songId: number) => void;
+  onPlay?: (item: SetlistItem) => Promise<void>;
+  currentSongId?: number | null;
+  changingSongId?: number | null;
   songsWithPdf?: Set<number>;
   variant?: "builder" | "live";
 };
@@ -41,6 +44,9 @@ type SortableItemProps = {
   index: number;
   onRemove?: (itemId: number) => void;
   onOpenPdf?: (songId: number) => void;
+  onPlay?: (item: SetlistItem) => Promise<void>;
+  currentSongId: number | null;
+  changingSongId: number | null;
   songsWithPdf: Set<number>;
   variant: "builder" | "live";
 };
@@ -50,6 +56,9 @@ function SortableItem({
   index,
   onRemove,
   onOpenPdf,
+  onPlay,
+  currentSongId,
+  changingSongId,
   songsWithPdf,
   variant,
 }: SortableItemProps) {
@@ -71,19 +80,24 @@ function SortableItem({
 
   const isRequest = item.itemType === "request";
   const hasPdf = songsWithPdf.has(item.id);
+  const isCurrentSong = currentSongId === item.id;
+  const isChangingSong = changingSongId === item.id;
+  const canPlay = item.id > 0;
 
   return (
     <article
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-3 rounded-2xl border p-4 shadow-lg ${
+      className={`flex items-center gap-3 rounded-2xl border p-4 shadow-lg transition ${
         isDragging
           ? "relative z-50 border-red-500 bg-zinc-800 opacity-90 shadow-2xl"
-          : isRequest
-            ? "border-amber-500/60 bg-amber-500/10"
-            : variant === "live"
-              ? "border-white/10 bg-zinc-900/80"
-              : "border-zinc-700 bg-zinc-950/70"
+          : isCurrentSong
+            ? "border-red-500 bg-red-950/40 shadow-red-950/40"
+            : isRequest
+              ? "border-amber-500/60 bg-amber-500/10"
+              : variant === "live"
+                ? "border-white/10 bg-zinc-900/80"
+                : "border-zinc-700 bg-zinc-950/70"
       }`}
     >
       <button
@@ -132,6 +146,31 @@ function SortableItem({
       {variant === "live" && (
         <button
           type="button"
+          onClick={() => void onPlay?.(item)}
+          disabled={!canPlay || changingSongId !== null}
+          title={
+            !canPlay
+              ? "Dieser Wunschsong ist noch nicht belegt"
+              : isCurrentSong
+                ? "Dieser Song läuft gerade"
+                : "Song jetzt spielen"
+          }
+          aria-label={`${item.title} jetzt spielen`}
+          className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border text-xl font-black transition ${
+            isCurrentSong
+              ? "border-red-400 bg-red-600 text-white"
+              : canPlay
+                ? "border-blue-500/50 bg-blue-600 text-white hover:bg-blue-500"
+                : "cursor-not-allowed border-white/10 bg-zinc-800 text-zinc-600 opacity-50"
+          }`}
+        >
+          {isChangingSong ? "…" : "▶"}
+        </button>
+      )}
+
+      {variant === "live" && (
+        <button
+          type="button"
           onClick={() => onOpenPdf?.(item.id)}
           disabled={!hasPdf}
           title={hasPdf ? "PDF öffnen" : "Keine PDF vorhanden"}
@@ -169,6 +208,9 @@ export default function SortableSetlist({
   onReorder,
   onRemove,
   onOpenPdf,
+  onPlay,
+  currentSongId = null,
+  changingSongId = null,
   songsWithPdf = new Set<number>(),
   variant = "builder",
 }: Props) {
@@ -249,6 +291,9 @@ export default function SortableSetlist({
               index={index}
               onRemove={onRemove}
               onOpenPdf={onOpenPdf}
+              onPlay={onPlay}
+              currentSongId={currentSongId}
+              changingSongId={changingSongId}
               songsWithPdf={songsWithPdf}
               variant={variant}
             />
