@@ -20,18 +20,16 @@ export default function AdminNavigation() {
     const isEditPage =
       pathname.startsWith("/admin/songs") ||
       pathname.startsWith("/admin/qr") ||
+      pathname.startsWith("/admin/band") ||
       pathname.startsWith("/archive");
 
     /*
-     * Wenn gerade eine Bearbeitungsseite geöffnet ist,
+     * Wenn gerade eine Verwaltungsseite geöffnet ist,
      * wird automatisch die passende Navigation angezeigt.
      */
     if (isEditPage) {
       setNavigationMode("edit");
-      localStorage.setItem(
-        NAVIGATION_MODE_KEY,
-        "edit",
-      );
+      localStorage.setItem(NAVIGATION_MODE_KEY, "edit");
       return;
     }
 
@@ -48,11 +46,7 @@ export default function AdminNavigation() {
     newMode: NavigationMode,
   ) {
     setNavigationMode(newMode);
-
-    localStorage.setItem(
-      NAVIGATION_MODE_KEY,
-      newMode,
-    );
+    localStorage.setItem(NAVIGATION_MODE_KEY, newMode);
   }
 
   async function handleLogout() {
@@ -97,9 +91,7 @@ export default function AdminNavigation() {
 
             <button
               type="button"
-              onClick={() =>
-                switchNavigationMode("edit")
-              }
+              onClick={() => switchNavigationMode("edit")}
               className="rounded-2xl border border-white/10 bg-zinc-800 px-5 py-3 font-bold text-zinc-300 transition hover:bg-zinc-700 hover:text-white"
               title="Verwaltung öffnen"
             >
@@ -141,6 +133,17 @@ export default function AdminNavigation() {
               📱 QR-Code
             </Link>
 
+            <Link
+              href="/admin/band"
+              className={`rounded-2xl px-5 py-3 font-bold transition ${
+                pathname.startsWith("/admin/band")
+                  ? "bg-red-600 text-white"
+                  : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+              }`}
+            >
+              👥 Bandverwaltung
+            </Link>
+
             <button
               type="button"
               onClick={handleLogout}
@@ -151,9 +154,7 @@ export default function AdminNavigation() {
 
             <button
               type="button"
-              onClick={() =>
-                switchNavigationMode("live")
-              }
+              onClick={() => switchNavigationMode("live")}
               className="rounded-2xl border border-red-500/40 bg-red-950/40 px-5 py-3 font-bold text-red-200 transition hover:bg-red-600 hover:text-white"
               title="Live-Navigation öffnen"
             >

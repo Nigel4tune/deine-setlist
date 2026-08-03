@@ -6,24 +6,52 @@ import { usePathname } from "next/navigation";
 export default function PublicNavigation() {
   const pathname = usePathname();
 
+  /*
+   * Bei einer Adresse wie /b/no-front/live:
+   * 0 = ""
+   * 1 = "b"
+   * 2 = "no-front"
+   * 3 = "live"
+   */
+  const pathParts = pathname.split("/");
+  const isBandRoute =
+    pathParts[1] === "b" && Boolean(pathParts[2]);
+
+  const bandSlug = isBandRoute ? pathParts[2] : null;
+  const bandBasePath = bandSlug ? `/b/${bandSlug}` : "";
+
+  const votePath = bandSlug ? bandBasePath : "/";
+  const livePath = bandSlug
+    ? `${bandBasePath}/live`
+    : "/live";
+  const bandInfoPath = bandSlug
+    ? `${bandBasePath}/bandinfos`
+    : "/band";
+
   const links = [
     {
-      href: "/",
+      href: votePath,
       icon: "🎵",
       label: "Abstimmen",
-      isActive: pathname === "/",
+      isActive:
+        pathname === votePath ||
+        pathname === `${votePath}/`,
     },
     {
-      href: "/live",
+      href: livePath,
       icon: "📊",
       label: "Live",
-      isActive: pathname.startsWith("/live"),
+      isActive:
+        pathname === livePath ||
+        pathname.startsWith(`${livePath}/`),
     },
     {
-      href: "/band",
+      href: bandInfoPath,
       icon: "🎸",
       label: "Bandinfos",
-      isActive: pathname.startsWith("/band"),
+      isActive:
+        pathname === bandInfoPath ||
+        pathname.startsWith(`${bandInfoPath}/`),
     },
   ];
 
