@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "../lib/client";
+import ActiveBandSelector from "./ActiveBandSelector";
 
 type NavigationMode = "live" | "edit";
 
@@ -63,8 +64,10 @@ export default function AdminNavigation() {
   const isLiveMode = navigationMode === "live";
 
   return (
-    <nav className="mb-8">
-      <div className="flex flex-wrap items-center gap-3">
+  <nav className="mb-8">
+    <ActiveBandSelector />
+
+    <div className="flex flex-wrap items-center gap-3">
         {isLiveMode ? (
           <>
             <Link
