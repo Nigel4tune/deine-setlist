@@ -2,56 +2,45 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 export default function PublicNavigation() {
   const pathname = usePathname();
 
-  /*
-   * Bei einer Adresse wie /b/no-front/live:
-   * 0 = ""
-   * 1 = "b"
-   * 2 = "no-front"
-   * 3 = "live"
-   */
-  const pathParts = pathname.split("/");
-  const isBandRoute =
-    pathParts[1] === "b" && Boolean(pathParts[2]);
+  const [bandSlug, setBandSlug] = useState("no-front");
 
-  const bandSlug = isBandRoute ? pathParts[2] : null;
-  const bandBasePath = bandSlug ? `/b/${bandSlug}` : "";
+  useEffect(() => {
+    const searchParameters = new URLSearchParams(
+      window.location.search,
+    );
 
-  const votePath = bandSlug ? bandBasePath : "/";
-  const livePath = bandSlug
-    ? `${bandBasePath}/live`
-    : "/live";
-  const bandInfoPath = bandSlug
-    ? `${bandBasePath}/bandinfos`
-    : "/band";
+    const requestedBand =
+      searchParameters.get("band")?.trim().toLowerCase() ||
+      "no-front";
+
+    setBandSlug(requestedBand);
+  }, []);
+
+  const bandParameter = encodeURIComponent(bandSlug);
 
   const links = [
     {
-      href: votePath,
+      href: `/?band=${bandParameter}`,
       icon: "🎵",
       label: "Abstimmen",
-      isActive:
-        pathname === votePath ||
-        pathname === `${votePath}/`,
+      isActive: pathname === "/",
     },
     {
-      href: livePath,
+      href: `/live?band=${bandParameter}`,
       icon: "📊",
       label: "Live",
-      isActive:
-        pathname === livePath ||
-        pathname.startsWith(`${livePath}/`),
+      isActive: pathname.startsWith("/live"),
     },
     {
-      href: bandInfoPath,
+      href: `/band?band=${bandParameter}`,
       icon: "🎸",
       label: "Bandinfos",
-      isActive:
-        pathname === bandInfoPath ||
-        pathname.startsWith(`${bandInfoPath}/`),
+      isActive: pathname.startsWith("/band"),
     },
   ];
 

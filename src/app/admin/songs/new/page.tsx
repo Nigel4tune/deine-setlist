@@ -37,8 +37,18 @@ export default function NewSongPage() {
         setIsSaving(false);
 
         if (error) {
-            console.error("Fehler beim Hinzufügen:", error);
-            setErrorMessage("Der Song konnte nicht hinzugefügt werden.");
+            console.error(
+                "Fehler beim Hinzufügen:",
+                error.message,
+                error.code,
+                error.details,
+                error.hint,
+            );
+
+            setErrorMessage(
+                `Der Song konnte nicht hinzugefügt werden: ${error.message}`,
+            );
+
             return;
         }
 

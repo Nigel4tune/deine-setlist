@@ -1,25 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-    DndContext,
-    DragEndEvent,
-    PointerSensor,
-    TouchSensor,
-    closestCenter,
-    useSensor,
-    useSensors,
-} from "@dnd-kit/core";
-
-import {
-    SortableContext,
-    arrayMove,
-    verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
 import AdminNavigation from "../../components/AdminNavigation";
 import { supabase } from "../../lib/supabase";
 import SortableSetlist from "../../components/SortableSetlist";
 import { getActiveConcertId } from "../../lib/concert";
+import { getActiveBandId } from "../../lib/band";
 
 type Song = {
     id: number;
@@ -48,6 +34,7 @@ type SavedSetlist = {
 
 export default function SetlistPage() {
     const [view, setView] = useState<SetlistView>("live");
+    const [bandId, setBandId] = useState<number | null>(null);
     const [songs, setSongs] = useState<Song[]>([]);
     const [setlist, setSetlist] = useState<SetlistItem[]>([]);
     const [loading, setLoading] = useState(true);
@@ -73,9 +60,31 @@ export default function SetlistPage() {
     const [savedSetlistMessage, setSavedSetlistMessage] = useState("");
 
     useEffect(() => {
-        loadSongs();
-        loadSetlist();
-        loadCurrentSong();
+        async function initializePage() {
+            try {
+                const activeBandId = await getActiveBandId();
+
+                setBandId(activeBandId);
+
+                await Promise.all([
+                    loadSongs(),
+                    loadSetlist(),
+                    loadCurrentSong(activeBandId),
+                ]);
+            } catch (error) {
+                console.error(
+                    "Setlist-Seite konnte nicht initialisiert werden:",
+                    error,
+                );
+
+                setPlayError(
+                    "Die aktive Band konnte nicht geladen werden.",
+                );
+                setLoading(false);
+            }
+        }
+
+        void initializePage();
     }, []);
 
     async function loadSongs() {
@@ -195,14 +204,15 @@ export default function SetlistPage() {
     function openPdf(songId: number) {
         window.location.href = `/admin/pdf/${songId}`;
     }
-    async function loadCurrentSong() {
+    async function loadCurrentSong(activeBandId: number) {
         try {
-            const concertId = await getActiveConcertId();
+            const concertId = await getActiveConcertId(activeBandId);
 
             const { data, error } = await supabase
                 .from("current_song")
                 .select("song_id")
                 .eq("concert_id", concertId)
+                .eq("band_id", activeBandId)
                 .maybeSingle();
 
             if (error) {
@@ -242,13 +252,21 @@ export default function SetlistPage() {
         setPlayError("");
 
         try {
-            const concertId = await getActiveConcertId();
+            if (bandId === null) {
+                setPlayError(
+                    "Die aktive Band konnte nicht geladen werden.",
+                );
+                return;
+            }
+
+            const concertId = await getActiveConcertId(bandId);
 
             const { error } = await supabase
                 .from("current_song")
                 .upsert(
                     {
                         concert_id: concertId,
+                        band_id: bandId,
                         setlist_item_id: item.setlistItemId,
                         song_id: item.id,
                         song_title: item.title,
@@ -326,12 +344,14 @@ export default function SetlistPage() {
         });
 
         if (error) {
-            console.error("Fehler beim Speichern des Songs:", {
-                message: error.message,
-                code: error.code,
-                details: error.details,
-                hint: error.hint,
-            });
+            console.error(
+                "Fehler beim Speichern des Songs:",
+                error.message,
+                error.code,
+                error.details,
+                error.hint,
+            );
+
             return;
         }
 

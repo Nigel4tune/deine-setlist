@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Share2, X } from "lucide-react";
 import { supabase } from "../lib/supabase";
+import { getActiveBandId } from "../lib/band";
 
 type PdfShareButtonProps = {
   songId: number;
@@ -16,35 +17,16 @@ type BandMember = {
   email: string;
 };
 
-const bandMembers: BandMember[] = [
-  {
-    userId: "36fbc0dc-e692-4926-bd62-64dbe2f4c92f",
-    name: "Nigel",
-    email: "nigel@nofront.band",
-  },
-  {
-    userId: "3f480daa-3c60-43ff-9500-89691086891e",
-    name: "Mateo",
-    email: "mateo@nofront.band",
-  },
-  {
-    userId: "97dca667-1ad6-4e38-9b27-c5671fa2523f",
-    name: "Aaron",
-    email: "aaron@nofront.band",
-  },
-  {
-    userId: "59805fc2-ff94-4201-a847-fb99ddf69251",
-    name: "Jens",
-    email: "jens@nofront.band",
-  },
-];
-
 export default function PdfShareButton({
   songId,
   songTitle,
   hasOwnPdf,
 }: PdfShareButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [bandMembers, setBandMembers] =
+  useState<BandMember[]>([]);
+const [activeBandId, setActiveBandId] =
+  useState<number | null>(null);
   const [currentUserId, setCurrentUserId] =
     useState<string | null>(null);
   const [sourcePdfId, setSourcePdfId] =
@@ -68,17 +50,23 @@ export default function PdfShareButton({
     );
 
   async function openShareDialog() {
-    if (!hasOwnPdf) {
-      alert(
-        "Bitte lade zuerst deine eigene PDF für diesen Song hoch.",
-      );
-      return;
-    }
+  if (!hasOwnPdf) {
+    alert(
+      "Bitte lade zuerst deine eigene PDF für diesen Song hoch.",
+    );
+    return;
+  }
 
-    setIsOpen(true);
-    setIsLoading(true);
-    setErrorMessage("");
-    setSelectedRecipients(new Set());
+  setIsOpen(true);
+  setIsLoading(true);
+  setErrorMessage("");
+  setSelectedRecipients(new Set());
+  setBandMembers([]);
+
+  try {
+    const bandId = await getActiveBandId();
+
+    setActiveBandId(bandId);
 
     const {
       data: { user },
@@ -92,49 +80,90 @@ export default function PdfShareButton({
       );
 
       setErrorMessage("Du bist nicht angemeldet.");
-      setIsLoading(false);
       return;
     }
 
     setCurrentUserId(user.id);
 
-    const { data: pdf, error: pdfError } = await supabase
-      .from("song_pdfs")
-      .select("id")
-      .eq("song_id", songId)
-      .eq("user_id", user.id)
-      .maybeSingle();
+    // Mitglieder der aktuell ausgewählten Band laden.
+    const { data: members, error: membersError } =
+      await supabase
+        .from("band_members")
+        .select("user_id, display_name, email")
+        .eq("band_id", bandId)
+        .eq("is_active", true)
+        .order("display_name", { ascending: true });
+
+    if (membersError) {
+      console.error(
+        "Bandmitglieder konnten nicht geladen werden:",
+        membersError.message,
+        membersError.code,
+        membersError.details,
+        membersError.hint,
+      );
+
+      setErrorMessage(
+        "Die Bandmitglieder konnten nicht geladen werden.",
+      );
+      return;
+    }
+
+    setBandMembers(
+      (members ?? []).map((member) => ({
+        userId: member.user_id,
+        name: member.display_name,
+        email: member.email,
+      })),
+    );
+
+    // Eigene PDF innerhalb der aktiven Band suchen.
+    const { data: pdf, error: pdfError } =
+      await supabase
+        .from("song_pdfs")
+        .select("id")
+        .eq("song_id", songId)
+        .eq("user_id", user.id)
+        .eq("band_id", bandId)
+        .maybeSingle();
 
     if (pdfError || !pdf) {
       console.error(
         "Eigene PDF konnte nicht geladen werden:",
-        pdfError,
+        pdfError?.message,
+        pdfError?.code,
+        pdfError?.details,
+        pdfError?.hint,
       );
 
       setErrorMessage(
         "Deine eigene PDF für diesen Song wurde nicht gefunden.",
       );
-      setIsLoading(false);
       return;
     }
 
     setSourcePdfId(pdf.id);
 
-    const { data: shares, error: sharesError } = await supabase
-      .from("song_pdf_shares")
-      .select("recipient_user_id")
-      .eq("source_pdf_id", pdf.id);
+    // Bestehende Freigaben dieser Band laden.
+    const { data: shares, error: sharesError } =
+      await supabase
+        .from("song_pdf_shares")
+        .select("recipient_user_id")
+        .eq("source_pdf_id", pdf.id)
+        .eq("band_id", bandId);
 
     if (sharesError) {
       console.error(
         "PDF-Freigaben konnten nicht geladen werden:",
-        sharesError,
+        sharesError.message,
+        sharesError.code,
+        sharesError.details,
+        sharesError.hint,
       );
 
       setErrorMessage(
         "Die bisherigen Freigaben konnten nicht geladen werden.",
       );
-      setIsLoading(false);
       return;
     }
 
@@ -145,9 +174,21 @@ export default function PdfShareButton({
         ),
       ),
     );
+  } catch (error) {
+    console.error(
+      "PDF-Freigabe konnte nicht geöffnet werden:",
+      error,
+    );
 
+    setErrorMessage(
+      error instanceof Error
+        ? error.message
+        : "Die aktive Band konnte nicht geladen werden.",
+    );
+  } finally {
     setIsLoading(false);
   }
+}
 
   function closeShareDialog() {
     if (isSaving) {
@@ -188,7 +229,7 @@ export default function PdfShareButton({
   }
 
   async function saveShares() {
-    if (!currentUserId || !sourcePdfId) {
+    if (!currentUserId || !sourcePdfId || !activeBandId) {
       setErrorMessage(
         "Die PDF-Freigaben können noch nicht gespeichert werden.",
       );
@@ -202,7 +243,8 @@ export default function PdfShareButton({
       await supabase
         .from("song_pdf_shares")
         .select("recipient_user_id")
-        .eq("source_pdf_id", sourcePdfId);
+        .eq("source_pdf_id", sourcePdfId)
+.eq("band_id", activeBandId);
 
     if (loadError) {
       console.error(
@@ -240,7 +282,8 @@ export default function PdfShareButton({
         .from("song_pdf_shares")
         .delete()
         .eq("source_pdf_id", sourcePdfId)
-        .in("recipient_user_id", recipientsToRemove);
+.eq("band_id", activeBandId)
+.in("recipient_user_id", recipientsToRemove);
 
       if (deleteError) {
         console.error(
@@ -261,10 +304,11 @@ export default function PdfShareButton({
         .from("song_pdf_shares")
         .insert(
           recipientsToAdd.map((recipientUserId) => ({
-            source_pdf_id: sourcePdfId,
-            sender_user_id: currentUserId,
-            recipient_user_id: recipientUserId,
-          })),
+  source_pdf_id: sourcePdfId,
+  sender_user_id: currentUserId,
+  recipient_user_id: recipientUserId,
+  band_id: activeBandId,
+})),
         );
 
       if (insertError) {
