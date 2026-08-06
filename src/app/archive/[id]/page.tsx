@@ -151,7 +151,7 @@ export default function ConcertPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-8 text-white sm:px-8">
+    <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-4 text-white sm:px-8">
       <div className="mx-auto max-w-5xl">
         <AdminNavigation />
 

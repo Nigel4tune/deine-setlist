@@ -6,6 +6,7 @@ import AdminNavigation from "../components/AdminNavigation";
 import { supabase } from "../lib/supabase";
 import { getActiveBandId } from "../lib/band";
 
+
 type Concert = {
   id: number;
   name: string;
@@ -213,24 +214,23 @@ export default function ArchivePage() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-8 text-white sm:px-8">
+    <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-4 text-white sm:px-8">
       <div className="mx-auto max-w-7xl">
         <AdminNavigation />
 
-        <div className="mb-10">
-          <p className="text-sm font-black uppercase tracking-[0.35em] text-red-500">
-            Deine Setlist
-          </p>
+        <div className="mb-8">
+  <p className="text-sm font-black uppercase tracking-[0.35em] text-red-500">
+    DEINE SETLIST
+  </p>
 
-          <h1 className="mt-3 text-4xl font-black sm:text-6xl">
-            Analytics
-          </h1>
+  <h1 className="mt-2 text-5xl font-black sm:text-6xl">
+    Analytics
+  </h1>
 
-          <p className="mt-3 max-w-2xl text-zinc-400">
-            Vergangene Konzerte und die beliebtesten
-            Publikumswünsche im Überblick.
-          </p>
-        </div>
+  <p className="mt-2 max-w-3xl text-lg text-zinc-400">
+    Vergangene Konzerte und die beliebtesten Publikumswünsche im Überblick.
+  </p>
+</div>
 
         {errorMessage && (
           <div className="mb-8 rounded-2xl border border-red-500/40 bg-red-500/10 p-5 text-red-200">

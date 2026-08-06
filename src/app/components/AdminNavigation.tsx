@@ -62,7 +62,7 @@ export default function AdminNavigation() {
 
   return (
     <>
-      <nav className="mb-8">
+      <nav className="mb-1">
         <div className="flex flex-wrap items-center gap-3">
           {isLiveMode ? (
             <>
