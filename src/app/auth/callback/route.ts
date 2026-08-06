@@ -1,36 +1,47 @@
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
+import { createClient } from "../../lib/server";
 
-export async function createClient() {
-  const cookieStore = await cookies();
+export async function GET(request: Request) {
+  const requestUrl = new URL(request.url);
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const code = requestUrl.searchParams.get("code");
+  const requestedNext =
+    requestUrl.searchParams.get("next");
 
-  if (!supabaseUrl) {
-    throw new Error("NEXT_PUBLIC_SUPABASE_URL fehlt in .env.local");
+  const nextPath =
+    requestedNext?.startsWith("/")
+      ? requestedNext
+      : "/admin";
+
+  if (!code) {
+    return NextResponse.redirect(
+      new URL(
+        "/admin-login?error=missing-code",
+        requestUrl.origin,
+      ),
+    );
   }
 
-  if (!supabaseAnonKey) {
-    throw new Error("NEXT_PUBLIC_SUPABASE_ANON_KEY fehlt in .env.local");
+  const supabase = await createClient();
+
+  const { error } =
+    await supabase.auth.exchangeCodeForSession(code);
+
+  if (error) {
+    console.error(
+      "Auth-Code konnte nicht eingelöst werden:",
+      error,
+    );
+
+    return NextResponse.redirect(
+      new URL(
+        "/admin-login?error=callback",
+        requestUrl.origin,
+      ),
+    );
   }
 
-  return createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll();
-      },
-
-      setAll(cookiesToSet) {
-        try {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set(name, value, options);
-          });
-        } catch {
-          // In Server Components dürfen Cookies teilweise nicht gesetzt werden.
-          // Die Sitzung wird später durch proxy.ts aktualisiert.
-        }
-      },
-    },
-  });
+  return NextResponse.redirect(
+    new URL(nextPath, requestUrl.origin),
+  );
 }

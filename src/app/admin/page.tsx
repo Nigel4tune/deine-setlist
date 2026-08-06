@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
 import { getActiveConcertId } from "../lib/concert";
 import { getActiveBandId } from "../lib/band";
@@ -757,8 +758,15 @@ export default function AdminPage() {
             </p>
           </div>
 
-          <div className="flex gap-3">
-            {isConcertActive === null ? (
+          <div className="flex flex-wrap gap-3">
+  <Link
+    href="/admin/qr"
+    className="rounded-2xl border border-white/10 bg-zinc-800 px-6 py-4 font-black text-white transition hover:bg-zinc-700"
+  >
+    📱 QR-Code
+  </Link>
+
+  {isConcertActive === null ? (
               <button
                 type="button"
                 disabled

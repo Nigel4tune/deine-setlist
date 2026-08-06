@@ -1,1 +1,1 @@
-export { default } from "../../../live/page";
+export { default } from "../../../live/LivePageContent";

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import AdminNavigation from "../components/AdminNavigation";
 import { supabase } from "../lib/supabase";
+import { getActiveBandId } from "../lib/band";
 
 type Concert = {
   id: number;
@@ -46,66 +47,69 @@ export default function ArchivePage() {
     setLoading(true);
     setErrorMessage("");
 
-    const [concertResponse, voteResponse] = await Promise.all([
-      supabase
+    try {
+      const activeBandId = await getActiveBandId();
+
+      const concertResponse = await supabase
         .from("concerts")
         .select("id, name, created_at, is_active")
+        .eq("band_id", activeBandId)
         .eq("is_active", false)
-        .order("created_at", { ascending: false }),
+        .order("created_at", { ascending: false });
 
-      supabase
+      if (concertResponse.error) {
+        throw new Error(
+          `Vergangene Konzerte konnten nicht geladen werden: ${concertResponse.error.message}`,
+        );
+      }
+
+      const archivedConcerts =
+        (concertResponse.data ?? []) as Concert[];
+
+      setConcerts(archivedConcerts);
+
+      const archivedConcertIds = archivedConcerts.map(
+        (concert) => concert.id,
+      );
+
+      if (archivedConcertIds.length === 0) {
+        setRanking([]);
+        return;
+      }
+
+      const voteResponse = await supabase
         .from("votes")
-        .select("song_id, song_title, artist"),
-    ]);
+        .select("song_id, song_title, artist")
+        .eq("band_id", activeBandId)
+        .in("concert_id", archivedConcertIds);
 
-    if (concertResponse.error) {
-      console.error(
-        "Vergangene Konzerte konnten nicht geladen werden:",
-        concertResponse.error.message,
-        concertResponse.error.code,
-        concertResponse.error.details,
-        concertResponse.error.hint,
-      );
+      if (voteResponse.error) {
+        throw new Error(
+          `Ranking konnte nicht geladen werden: ${voteResponse.error.message}`,
+        );
+      }
 
-      setErrorMessage(
-        "Die vergangenen Konzerte konnten nicht geladen werden.",
-      );
-    } else {
-      setConcerts(concertResponse.data ?? []);
-    }
-
-    if (voteResponse.error) {
-      console.error(
-        "Ranking konnte nicht geladen werden:",
-        voteResponse.error.message,
-        voteResponse.error.code,
-        voteResponse.error.details,
-        voteResponse.error.hint,
-      );
-
-      setErrorMessage((currentMessage) =>
-        currentMessage
-          ? `${currentMessage} Das Ranking konnte ebenfalls nicht geladen werden.`
-          : "Das Top-10-Ranking konnte nicht geladen werden.",
-      );
-    } else {
       const groupedVotes = new Map<number, RankingSong>();
 
-      (voteResponse.data as VoteRow[] | null)?.forEach((vote) => {
-        const existingSong = groupedVotes.get(vote.song_id);
+      (voteResponse.data as VoteRow[] | null)?.forEach(
+        (vote) => {
+          const existingSong = groupedVotes.get(
+            vote.song_id,
+          );
 
-        if (existingSong) {
-          existingSong.votes += 1;
-          return;
-        }
+          if (existingSong) {
+            existingSong.votes += 1;
+            return;
+          }
 
-        groupedVotes.set(vote.song_id, {
-          songId: vote.song_id,
-          songTitle: vote.song_title,
-          artist: vote.artist,
-          votes: 1,
-        });
-      });
+          groupedVotes.set(vote.song_id, {
+            songId: vote.song_id,
+            songTitle: vote.song_title,
+            artist: vote.artist,
+            votes: 1,
+          });
+        },
+      );
 
       const topTen = Array.from(groupedVotes.values())
         .sort((firstSong, secondSong) => {
@@ -121,9 +125,23 @@ export default function ArchivePage() {
         .slice(0, 10);
 
       setRanking(topTen);
-    }
+    } catch (error) {
+      console.error(
+        "Analytics konnten nicht geladen werden:",
+        error,
+      );
 
-    setLoading(false);
+      setConcerts([]);
+      setRanking([]);
+
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Die Analytics konnten nicht geladen werden.",
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function deleteConcert(concert: Concert) {
