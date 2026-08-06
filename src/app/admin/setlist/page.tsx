@@ -67,8 +67,8 @@ export default function SetlistPage() {
                 setBandId(activeBandId);
 
                 await Promise.all([
-                    loadSongs(),
-                    loadSetlist(),
+                    loadSongs(activeBandId),
+                    loadSetlist(activeBandId),
                     loadCurrentSong(activeBandId),
                 ]);
             } catch (error) {
@@ -87,10 +87,11 @@ export default function SetlistPage() {
         void initializePage();
     }, []);
 
-    async function loadSongs() {
+    async function loadSongs(activeBandId: number) {
         const { data, error } = await supabase
             .from("songs")
             .select("id, title, artist")
+            .eq("band_id", activeBandId)
             .order("title");
 
         if (error) {
@@ -102,7 +103,7 @@ export default function SetlistPage() {
         setSongs(data ?? []);
         setLoading(false);
     }
-    async function loadSetlist() {
+    async function loadSetlist(activeBandId: number) {
         const {
             data: { user },
         } = await supabase.auth.getUser();
@@ -132,11 +133,13 @@ export default function SetlistPage() {
                 artist
             )
         `)
+                .eq("band_id", activeBandId)
                 .order("position"),
 
             supabase
                 .from("song_pdfs")
                 .select("song_id")
+                .eq("band_id", activeBandId)
         ]);
 
         if (setlistResponse.error) {
@@ -310,6 +313,10 @@ export default function SetlistPage() {
 
 
     async function addSong(song: Song) {
+        if (bandId === null) {
+            return;
+        }
+
         const songIsAlreadyInSetlist = setlist.some(
             (setlistSong) => setlistSong.id === song.id,
         );
@@ -321,6 +328,7 @@ export default function SetlistPage() {
         const { data: lastItem, error: positionError } = await supabase
             .from("setlist_items")
             .select("position")
+            .eq("band_id", bandId)
             .order("position", { ascending: false })
             .limit(1)
             .maybeSingle();
@@ -338,6 +346,7 @@ export default function SetlistPage() {
         const nextPosition = (lastItem?.position ?? 0) + 1;
 
         const { error } = await supabase.from("setlist_items").insert({
+            band_id: bandId,
             position: nextPosition,
             item_type: "song",
             song_id: song.id,
@@ -355,12 +364,19 @@ export default function SetlistPage() {
             return;
         }
 
-        await loadSetlist();
+        if (bandId !== null) {
+            await loadSetlist(bandId);
+        }
     }
     async function addRequestPlaceholder() {
+        if (bandId === null) {
+            return;
+        }
+
         const { data: lastPositionData, error: positionError } = await supabase
             .from("setlist_items")
             .select("position")
+            .eq("band_id", bandId)
             .order("position", { ascending: false })
             .limit(1);
 
@@ -377,6 +393,7 @@ export default function SetlistPage() {
         const { data: lastRequestData, error: requestError } = await supabase
             .from("setlist_items")
             .select("request_number")
+            .eq("band_id", bandId)
             .eq("item_type", "request")
             .order("request_number", { ascending: false })
             .limit(1);
@@ -397,6 +414,7 @@ export default function SetlistPage() {
                 : 1;
 
         const { error } = await supabase.from("setlist_items").insert({
+            band_id: bandId,
             position: nextPosition,
             item_type: "request",
             song_id: null,
@@ -409,14 +427,21 @@ export default function SetlistPage() {
             return;
         }
 
-        await loadSetlist();
+        if (bandId !== null) {
+            await loadSetlist(bandId);
+        }
     }
 
     async function removeSong(setlistItemId: number) {
+        if (bandId === null) {
+            return;
+        }
+
         const { error: deleteError } = await supabase
             .from("setlist_items")
             .delete()
-            .eq("id", setlistItemId);
+            .eq("id", setlistItemId)
+            .eq("band_id", bandId);
 
         if (deleteError) {
             console.error("Fehler beim Löschen des Eintrags:", {
@@ -437,6 +462,7 @@ export default function SetlistPage() {
             await supabase
                 .from("setlist_items")
                 .select("id, item_type")
+                .eq("band_id", bandId)
                 .order("position");
 
         if (loadError) {
@@ -445,7 +471,9 @@ export default function SetlistPage() {
                 loadError,
             );
 
-            await loadSetlist();
+            if (bandId !== null) {
+            await loadSetlist(bandId);
+        }
             return;
         }
 
@@ -463,7 +491,8 @@ export default function SetlistPage() {
                 .update({
                     position: -(index + 1),
                 })
-                .eq("id", item.id);
+                .eq("id", item.id)
+                .eq("band_id", bandId);
 
             if (error) {
                 console.error(
@@ -471,7 +500,9 @@ export default function SetlistPage() {
                     error,
                 );
 
-                await loadSetlist();
+                if (bandId !== null) {
+            await loadSetlist(bandId);
+        }
                 return;
             }
         }
@@ -501,7 +532,8 @@ export default function SetlistPage() {
             const { error } = await supabase
                 .from("setlist_items")
                 .update(updateData)
-                .eq("id", item.id);
+                .eq("id", item.id)
+                .eq("band_id", bandId);
 
             if (error) {
                 console.error(
@@ -509,15 +541,23 @@ export default function SetlistPage() {
                     error,
                 );
 
-                await loadSetlist();
+                if (bandId !== null) {
+            await loadSetlist(bandId);
+        }
                 return;
             }
         }
 
-        await loadSetlist();
+        if (bandId !== null) {
+            await loadSetlist(bandId);
+        }
     }
 
     async function saveNewOrder(songs: SetlistItem[]) {
+        if (bandId === null) {
+            return;
+        }
+
         // Erster Durchgang:
         // Vorübergehend eindeutige negative Positionen vergeben
         for (let index = 0; index < songs.length; index++) {
@@ -528,7 +568,8 @@ export default function SetlistPage() {
                 .update({
                     position: -(index + 1),
                 })
-                .eq("id", song.setlistItemId);
+                .eq("id", song.setlistItemId)
+                .eq("band_id", bandId);
 
             if (error) {
                 console.error("Fehler bei der Zwischenspeicherung:", {
@@ -551,7 +592,8 @@ export default function SetlistPage() {
                 .update({
                     position: index + 1,
                 })
-                .eq("id", song.setlistItemId);
+                .eq("id", song.setlistItemId)
+                .eq("band_id", bandId);
             if (error) {
                 console.error("Fehler beim Speichern der Reihenfolge:", {
                     message: error.message,
@@ -642,6 +684,10 @@ export default function SetlistPage() {
     }
 
     async function openSavedSetlists() {
+        if (bandId === null) {
+            return;
+        }
+
         setIsLoadDialogOpen(true);
         setIsLoadingSavedSetlists(true);
         setSavedSetlistMessage("");
@@ -649,6 +695,7 @@ export default function SetlistPage() {
         const { data, error } = await supabase
             .from("saved_setlists")
             .select("id, name, created_at")
+            .eq("band_id", bandId)
             .order("created_at", { ascending: false });
 
         if (error) {
@@ -709,7 +756,9 @@ export default function SetlistPage() {
             return;
         }
 
-        await loadSetlist();
+        if (bandId !== null) {
+            await loadSetlist(bandId);
+        }
 
         setSavedSetlistMessage(
             `„${savedSetlist.name}“ wurde als aktuelle Setlist geladen.`,
@@ -872,13 +921,6 @@ export default function SetlistPage() {
                                             📂
                                         </button>
 
-                                        <button
-                                            type="button"
-                                            onClick={addRequestPlaceholder}
-                                            className="h-12 shrink-0 rounded-xl bg-amber-500 px-4 font-black text-black transition hover:bg-amber-400"
-                                        >
-                                            + Wunschsong
-                                        </button>
                                     </div>
                                 </div>
 
@@ -898,13 +940,25 @@ export default function SetlistPage() {
 
                             <section className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5">
                                 <div className="mb-5">
-                                    <h3 className="text-2xl font-bold">
-                                        Verfügbare Songs
-                                    </h3>
+                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                        <div>
+                                            <h3 className="text-2xl font-bold">
+                                                Verfügbare Songs
+                                            </h3>
 
-                                    <p className="mt-1 text-sm text-zinc-400">
-                                        {filteredSongs.length} von {songs.length} Songs angezeigt
-                                    </p>
+                                            <p className="mt-1 text-sm text-zinc-400">
+                                                {filteredSongs.length} von {songs.length} Songs angezeigt
+                                            </p>
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            onClick={addRequestPlaceholder}
+                                            className="h-12 shrink-0 rounded-xl bg-amber-500 px-4 font-black text-black transition hover:bg-amber-400"
+                                        >
+                                            + Wunschsong
+                                        </button>
+                                    </div>
 
                                     <div className="relative mt-4">
                                         <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500">

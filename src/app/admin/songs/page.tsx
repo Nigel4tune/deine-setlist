@@ -12,6 +12,7 @@ import {
     FileUp,
 } from "lucide-react";
 import PdfShareButton from "../../components/PdfShareButton";
+import { getActiveBandId } from "../../lib/band";
 
 type Song = {
     id: number;
@@ -30,6 +31,7 @@ function normalizeSearchText(value: string) {
 
 export default function AdminSongsPage() {
     const [songs, setSongs] = useState<Song[]>([]);
+    const [bandId, setBandId] = useState<number | null>(null);
     const [loading, setLoading] = useState(true);
     const [errorMessage, setErrorMessage] = useState("");
 
@@ -63,6 +65,9 @@ export default function AdminSongsPage() {
                 return;
             }
 
+            const activeBandId = await getActiveBandId();
+            setBandId(activeBandId);
+
             const [
                 songsResponse,
                 ownPdfsResponse,
@@ -71,19 +76,22 @@ export default function AdminSongsPage() {
                 supabase
                     .from("songs")
                     .select("id, title, artist, is_active")
+                    .eq("band_id", activeBandId)
                     .order("title"),
 
                 // Nur meine eigenen PDFs
                 supabase
                     .from("song_pdfs")
                     .select("song_id")
+                    .eq("band_id", activeBandId)
                     .eq("user_id", user.id),
 
                 // Eigene und für mich freigegebene PDFs.
                 // Welche Zeilen sichtbar sind, regelt Supabase über RLS.
                 supabase
                     .from("song_pdfs")
-                    .select("song_id"),
+                    .select("song_id")
+                    .eq("band_id", activeBandId),
             ]);
 
             if (songsResponse.error) {
@@ -173,6 +181,11 @@ export default function AdminSongsPage() {
     });
 
     async function uploadPdf(song: Song, file: File) {
+        if (bandId === null) {
+            alert("Die aktive Band konnte nicht geladen werden.");
+            return;
+        }
+
         setUploadingPdfSongId(song.id);
 
         try {
@@ -188,7 +201,7 @@ export default function AdminSongsPage() {
             const extension = file.name.split(".").pop() ?? "pdf";
 
             const storagePath =
-                `${user.id}/${song.id}.${extension}`;
+                `bands/${bandId}/${user.id}/${song.id}.${extension}`;
 
             const { error: uploadError } = await supabase.storage
                 .from("song-pdfs")
@@ -208,6 +221,7 @@ export default function AdminSongsPage() {
                     {
                         song_id: song.id,
                         user_id: user.id,
+                        band_id: bandId,
                         storage_path: storagePath,
                         file_name: file.name,
                     },
@@ -233,6 +247,10 @@ export default function AdminSongsPage() {
         }
     }
     async function saveSong(id: number) {
+        if (bandId === null) {
+            return;
+        }
+
         const updatedTitle = editTitle.trim();
         const updatedArtist = editArtist.trim();
 
@@ -249,7 +267,8 @@ export default function AdminSongsPage() {
                 title: updatedTitle,
                 artist: updatedArtist,
             })
-            .eq("id", id);
+            .eq("id", id)
+            .eq("band_id", bandId);
 
         setIsSavingEdit(false);
 
@@ -283,6 +302,10 @@ export default function AdminSongsPage() {
     }
 
     async function toggleSongStatus(song: Song) {
+        if (bandId === null) {
+            return;
+        }
+
         const newStatus = !song.is_active;
 
         const { error } = await supabase
@@ -290,7 +313,8 @@ export default function AdminSongsPage() {
             .update({
                 is_active: newStatus,
             })
-            .eq("id", song.id);
+            .eq("id", song.id)
+            .eq("band_id", bandId);
 
         if (error) {
             console.error("Fehler beim Ändern des Status:", error);
@@ -311,6 +335,10 @@ export default function AdminSongsPage() {
     }
 
     async function deleteSong(song: Song) {
+        if (bandId === null) {
+            return;
+        }
+
         const confirmed = window.confirm(
             `Möchtest du „${song.title}“ von ${song.artist} wirklich endgültig löschen?\n\nDabei werden auch alle zugehörigen Abstimmungen dieses Songs gelöscht.`
         );
@@ -324,7 +352,8 @@ export default function AdminSongsPage() {
         const { error } = await supabase
             .from("songs")
             .delete()
-            .eq("id", song.id);
+            .eq("id", song.id)
+            .eq("band_id", bandId);
 
         setDeletingSongId(null);
 

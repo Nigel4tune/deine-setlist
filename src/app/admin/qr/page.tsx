@@ -3,12 +3,39 @@
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import AdminNavigation from "../../components/AdminNavigation";
+import { getCurrentBand } from "../../lib/band";
 
 export default function QRPage() {
   const [voteUrl, setVoteUrl] = useState("");
+  const [bandName, setBandName] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    setVoteUrl(window.location.origin);
+    async function loadVoteUrl() {
+      try {
+        const currentBand = await getCurrentBand();
+
+        setBandName(currentBand.name);
+        setVoteUrl(
+          `${window.location.origin}/?band=${encodeURIComponent(
+            currentBand.slug,
+          )}`,
+        );
+      } catch (error) {
+        console.error(
+          "QR-Code konnte nicht geladen werden:",
+          error,
+        );
+
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Der QR-Code konnte nicht geladen werden.",
+        );
+      }
+    }
+
+    void loadVoteUrl();
   }, []);
 
   return (
@@ -18,7 +45,7 @@ export default function QRPage() {
 
         <div className="mt-10 flex flex-col items-center text-center">
           <p className="text-sm font-bold uppercase tracking-[0.3em] text-red-500">
-            Deine Setlist
+            {bandName || "Deine Setlist"}
           </p>
 
           <h1 className="mt-3 text-5xl font-black">
@@ -26,10 +53,14 @@ export default function QRPage() {
           </h1>
 
           <p className="mt-5 max-w-xl text-lg text-zinc-400">
-            QR-Code scannen und direkt den nächsten Song wählen.
+            QR-Code scannen und direkt für diese Band abstimmen.
           </p>
 
-          {voteUrl ? (
+          {errorMessage ? (
+            <div className="mt-10 rounded-3xl border border-red-500/40 bg-red-950/40 px-6 py-5 text-red-200">
+              {errorMessage}
+            </div>
+          ) : voteUrl ? (
             <>
               <div className="mt-10 rounded-[40px] bg-white p-8 shadow-2xl">
                 <QRCodeSVG value={voteUrl} size={350} />

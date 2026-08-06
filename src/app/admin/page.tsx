@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { getActiveConcertId } from "../lib/concert";
+import { getActiveBandId } from "../lib/band";
 import { supabase } from "../lib/supabase";
 import AdminNavigation from "../components/AdminNavigation";
 
@@ -101,7 +102,8 @@ export default function AdminPage() {
     setErrorMessage("");
 
     try {
-      const concertId = await getActiveConcertId();
+      const bandId = await getActiveBandId();
+      const concertId = await getActiveConcertId(bandId);
 
       const [
         votesResponse,
@@ -966,8 +968,8 @@ export default function AdminPage() {
                             isChanging || songsInSetlist.has(song.songId)
                           }
                           className={`min-h-16 w-28 rounded-xl px-3 py-3 text-center text-sm font-black leading-tight transition ${songsInSetlist.has(song.songId)
-                              ? "cursor-default border border-green-500/40 bg-green-950 text-green-300"
-                              : "bg-amber-500 text-black hover:bg-amber-400 disabled:cursor-wait disabled:opacity-60"
+                            ? "cursor-default border border-green-500/40 bg-green-950 text-green-300"
+                            : "bg-amber-500 text-black hover:bg-amber-400 disabled:cursor-wait disabled:opacity-60"
                             }`}
                         >
                           {isChanging ? (

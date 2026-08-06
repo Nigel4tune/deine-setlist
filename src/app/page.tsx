@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { supabase } from "./lib/supabase";
 import { getActiveConcertId } from "./lib/concert";
 import { getDeviceId } from "./lib/device";
@@ -14,6 +15,12 @@ type Song = {
   artist: string;
 };
 
+type PublicBand = {
+  id: number;
+  name: string;
+  slug: string;
+};
+
 function normalizeSearchText(text: string) {
   return text
     .toLowerCase()
@@ -24,6 +31,15 @@ function normalizeSearchText(text: string) {
 }
 
 export default function Home() {
+  const searchParams = useSearchParams();
+
+  const bandSlug =
+    searchParams.get("band")?.trim().toLowerCase() ||
+    "no-front";
+
+  const [band, setBand] = useState<PublicBand | null>(null);
+  const [bandLoading, setBandLoading] = useState(true);
+  const [bandError, setBandError] = useState("");
   const [songs, setSongs] = useState<Song[]>([]);
   const [screen, setScreen] = useState<Screen>("landing");
   const [selectedSongIds, setSelectedSongIds] = useState<number[]>([]);
@@ -40,9 +56,65 @@ export default function Home() {
   const [changeVotesError, setChangeVotesError] = useState("");
 
   useEffect(() => {
+    async function loadBand() {
+      if (!bandSlug) {
+        return;
+      }
+      setBandLoading(true);
+      setBandError("");
+
+      const { data, error } = await supabase.rpc(
+        "get_public_band_by_slug",
+        {
+          requested_slug: bandSlug,
+        },
+      );
+
+      if (error) {
+        console.error(
+          "Band konnte nicht geladen werden:",
+          error.message,
+          error.code,
+          error.details,
+          error.hint,
+        );
+
+        setBandError(
+          "Die gewünschte Band konnte nicht geladen werden.",
+        );
+        setBandLoading(false);
+        return;
+      }
+
+      const loadedBand = Array.isArray(data)
+        ? data[0]
+        : data;
+
+      if (!loadedBand) {
+        setBandError("Diese Band wurde nicht gefunden.");
+        setBandLoading(false);
+        return;
+      }
+
+      setBand({
+        id: Number(loadedBand.id),
+        name: loadedBand.name,
+        slug: loadedBand.slug,
+      });
+
+      setBandLoading(false);
+    }
+
+    void loadBand();
+  }, [bandSlug]);
+
+  useEffect(() => {
     async function checkExistingVote() {
+      if (!band) {
+        return;
+      }
       try {
-        const concertId = await getActiveConcertId();
+        const concertId = await getActiveConcertId(band.id);
         const deviceId = getDeviceId();
 
         const { data: alreadyVoted, error } = await supabase.rpc(
@@ -73,20 +145,25 @@ export default function Home() {
     }
 
     void checkExistingVote();
-  }, []);
+  }, [band]);
 
   useEffect(() => {
     async function loadAvailableSongs() {
+      if (!band) {
+        return;
+      }
       const [songsResponse, setlistResponse] = await Promise.all([
         supabase
           .from("songs")
           .select("id, title, artist")
+          .eq("band_id", band.id)
           .eq("is_active", true)
           .order("title"),
 
         supabase
           .from("setlist_items")
-          .select("song_id, assigned_song_id"),
+          .select("song_id, assigned_song_id")
+          .eq("band_id", band.id),
       ]);
 
       if (songsResponse.error) {
@@ -137,7 +214,7 @@ export default function Home() {
     }
 
     void loadAvailableSongs();
-  }, []);
+  }, [band]);
 
   const filteredSongs = useMemo(() => {
     const normalizedQuery = normalizeSearchText(searchTerm);
@@ -187,6 +264,10 @@ export default function Home() {
   }
 
   async function submitVotes() {
+    if (!band) {
+      setSubmitError("Die Band konnte nicht geladen werden.");
+      return;
+    }
     if (selectedSongs.length !== 3 || isSubmitting) {
       return;
     }
@@ -195,7 +276,7 @@ export default function Home() {
     setSubmitError("");
 
     try {
-      const concertId = await getActiveConcertId();
+      const concertId = await getActiveConcertId(band.id);
       const deviceId = getDeviceId();
 
       const {
@@ -217,6 +298,7 @@ export default function Home() {
       }
 
       const votes = selectedSongs.map((song) => ({
+        band_id: band.id,
         concert_id: concertId,
         device_id: deviceId,
         song_id: song.id,
@@ -282,6 +364,12 @@ export default function Home() {
     if (isChangingVotes) {
       return;
     }
+    if (!band) {
+      setChangeVotesError(
+        "Die Band konnte nicht geladen werden.",
+      );
+      return;
+    }
 
     const confirmed = window.confirm(
       "Möchtest du deine bisherige Auswahl löschen und neu abstimmen?",
@@ -295,7 +383,7 @@ export default function Home() {
     setChangeVotesError("");
 
     try {
-      const concertId = await getActiveConcertId();
+      const concertId = await getActiveConcertId(band.id);
       const deviceId = getDeviceId();
 
       const { error } = await supabase
@@ -338,6 +426,36 @@ export default function Home() {
     } finally {
       setIsChangingVotes(false);
     }
+  }
+
+  if (bandLoading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 pb-28 text-white">
+        <p className="text-zinc-400">
+          Band wird geladen …
+        </p>
+
+        <PublicNavigation />
+      </main>
+    );
+  }
+
+  if (bandError || !band) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 pb-28 text-white">
+        <section className="w-full max-w-xl rounded-3xl border border-red-500/30 bg-red-950/20 p-8 text-center">
+          <h1 className="text-3xl font-black">
+            Band nicht gefunden
+          </h1>
+
+          <p className="mt-4 text-red-200">
+            {bandError || "Diese Band wurde nicht gefunden."}
+          </p>
+        </section>
+
+        <PublicNavigation />
+      </main>
+    );
   }
 
   if (isCheckingVote) {
@@ -390,23 +508,17 @@ export default function Home() {
               Weitere Infos:
             </p>
 
-            <a
-              href="https://www.instagram.com/nofrontband/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-3 rounded-xl border border-pink-500/30 bg-pink-500/10 px-5 py-3 font-semibold text-pink-300 transition hover:border-pink-400 hover:bg-pink-500/20 hover:text-pink-200"
-              aria-label="No Front auf Instagram öffnen"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-                className="h-6 w-6 fill-current"
+            {band.slug === "no-front" && (
+              <a
+                href="https://www.instagram.com/nofrontband/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 rounded-xl border border-pink-500/30 bg-pink-500/10 px-5 py-3 font-semibold text-pink-300 transition hover:border-pink-400 hover:bg-pink-500/20 hover:text-pink-200"
+                aria-label="No Front auf Instagram öffnen"
               >
-                <path d="M7.75 2h8.5A5.76 5.76 0 0 1 22 7.75v8.5A5.76 5.76 0 0 1 16.25 22h-8.5A5.76 5.76 0 0 1 2 16.25v-8.5A5.76 5.76 0 0 1 7.75 2Zm0 2A3.75 3.75 0 0 0 4 7.75v8.5A3.75 3.75 0 0 0 7.75 20h8.5A3.75 3.75 0 0 0 20 16.25v-8.5A3.75 3.75 0 0 0 16.25 4h-8.5ZM17.5 5.5a1 1 0 1 1 0 2 1 1 0 0 1 0-2ZM12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z" />
-              </svg>
-
-              <span>@nofrontband</span>
-            </a>
+                {/* Dein vorhandenes SVG und der Text bleiben hier */}
+              </a>
+            )}
           </div>
         </section>
 
@@ -420,7 +532,7 @@ export default function Home() {
       <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-10 pb-28 text-white">
         <section className="w-full max-w-xl text-center">
           <p className="mb-5 text-sm font-bold uppercase tracking-[0.35em] text-red-500">
-            No Front präsentiert
+            {band.name} präsentiert
           </p>
 
           <div className="mb-6 text-7xl" aria-hidden="true">
@@ -523,7 +635,7 @@ export default function Home() {
       <section className="mx-auto w-full max-w-2xl">
         <header className="text-center">
           <p className="mb-3 text-sm font-bold uppercase tracking-[0.3em] text-red-500">
-            No Front präsentiert
+            {band.name} präsentiert
           </p>
 
           <h1 className="text-4xl font-black sm:text-6xl">
@@ -550,11 +662,10 @@ export default function Home() {
             {[1, 2, 3].map((number) => (
               <span
                 key={number}
-                className={`h-3 w-3 rounded-full ${
-                  selectedSongIds.length >= number
-                    ? "bg-red-500"
-                    : "bg-zinc-700"
-                }`}
+                className={`h-3 w-3 rounded-full ${selectedSongIds.length >= number
+                  ? "bg-red-500"
+                  : "bg-zinc-700"
+                  }`}
               />
             ))}
           </div>
@@ -585,13 +696,12 @@ export default function Home() {
                 type="button"
                 onClick={() => toggleSong(song.id)}
                 disabled={selectionIsFull || isSubmitting}
-                className={`flex w-full items-center justify-between rounded-2xl border px-5 py-4 text-left transition ${
-                  isSelected
-                    ? "border-red-500 bg-red-600/20"
-                    : selectionIsFull
-                      ? "cursor-not-allowed border-white/5 bg-zinc-900/40 text-zinc-600"
-                      : "border-white/10 bg-zinc-900 hover:border-white/30 hover:bg-zinc-800"
-                }`}
+                className={`flex w-full items-center justify-between rounded-2xl border px-5 py-4 text-left transition ${isSelected
+                  ? "border-red-500 bg-red-600/20"
+                  : selectionIsFull
+                    ? "cursor-not-allowed border-white/5 bg-zinc-900/40 text-zinc-600"
+                    : "border-white/10 bg-zinc-900 hover:border-white/30 hover:bg-zinc-800"
+                  }`}
               >
                 <span>
                   <span className="block font-bold">
@@ -604,11 +714,10 @@ export default function Home() {
                 </span>
 
                 <span
-                  className={`flex h-8 w-8 items-center justify-center rounded-full border font-bold ${
-                    isSelected
-                      ? "border-red-500 bg-red-500"
-                      : "border-zinc-600 text-transparent"
-                  }`}
+                  className={`flex h-8 w-8 items-center justify-center rounded-full border font-bold ${isSelected
+                    ? "border-red-500 bg-red-500"
+                    : "border-zinc-600 text-transparent"
+                    }`}
                 >
                   ✓
                 </span>

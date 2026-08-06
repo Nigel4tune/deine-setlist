@@ -1,25 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import {
+  usePathname,
+  useSearchParams,
+} from "next/navigation";
 
 export default function PublicNavigation() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
 
-  const [bandSlug, setBandSlug] = useState("no-front");
-
-  useEffect(() => {
-    const searchParameters = new URLSearchParams(
-      window.location.search,
-    );
-
-    const requestedBand =
-      searchParameters.get("band")?.trim().toLowerCase() ||
-      "no-front";
-
-    setBandSlug(requestedBand);
-  }, []);
+  const bandSlug =
+    searchParams.get("band")?.trim().toLowerCase() ||
+    "no-front";
 
   const bandParameter = encodeURIComponent(bandSlug);
 
@@ -37,10 +30,10 @@ export default function PublicNavigation() {
       isActive: pathname.startsWith("/live"),
     },
     {
-      href: `/band?band=${bandParameter}`,
+      href: `/b/${bandParameter}`,
       icon: "🎸",
       label: "Bandinfos",
-      isActive: pathname.startsWith("/band"),
+      isActive: pathname.startsWith("/b/"),
     },
   ];
 

@@ -26,6 +26,10 @@ type BandMember = {
 export default function BandManagementPage() {
   const [band, setBand] = useState<CurrentBand | null>(null);
   const [members, setMembers] = useState<BandMember[]>([]);
+  const [currentUserId, setCurrentUserId] =
+    useState<string | null>(null);
+  const [changingMemberId, setChangingMemberId] =
+    useState<string | null>(null);
 
   const [bandName, setBandName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
@@ -56,6 +60,19 @@ export default function BandManagementPage() {
       }
 
       const supabase = createClient();
+
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        throw new Error(
+          "Das aktuelle Benutzerkonto konnte nicht geladen werden.",
+        );
+      }
+
+      setCurrentUserId(user.id);
 
       const { data: memberData, error: memberError } =
         await supabase
@@ -196,6 +213,112 @@ export default function BandManagementPage() {
     }
   }
 
+  async function setMemberActive(
+    member: BandMember,
+    isActive: boolean,
+  ) {
+    if (changingMemberId !== null) {
+      return;
+    }
+
+    const actionLabel = isActive
+      ? "reaktivieren"
+      : "deaktivieren";
+
+    const confirmed = window.confirm(
+      `Möchtest du „${member.display_name}“ wirklich ${actionLabel}?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setChangingMemberId(member.user_id);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    const supabase = createClient();
+
+    const { error } = await supabase.rpc(
+      "set_band_member_active",
+      {
+        p_member_user_id: member.user_id,
+        p_is_active: isActive,
+      },
+    );
+
+    if (error) {
+      console.error(
+        "Mitgliedsstatus konnte nicht geändert werden:",
+        error,
+      );
+
+      setErrorMessage(
+        error.message ||
+          "Der Mitgliedsstatus konnte nicht geändert werden.",
+      );
+      setChangingMemberId(null);
+      return;
+    }
+
+    setSuccessMessage(
+      isActive
+        ? `${member.display_name} wurde reaktiviert.`
+        : `${member.display_name} wurde deaktiviert.`,
+    );
+
+    await loadBandData();
+    setChangingMemberId(null);
+  }
+
+  async function removeMember(member: BandMember) {
+    if (changingMemberId !== null) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Möchtest du „${member.display_name}“ wirklich endgültig aus der Band entfernen?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setChangingMemberId(member.user_id);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    const supabase = createClient();
+
+    const { error } = await supabase.rpc(
+      "remove_band_member",
+      {
+        p_member_user_id: member.user_id,
+      },
+    );
+
+    if (error) {
+      console.error(
+        "Bandmitglied konnte nicht entfernt werden:",
+        error,
+      );
+
+      setErrorMessage(
+        error.message ||
+          "Das Bandmitglied konnte nicht entfernt werden.",
+      );
+      setChangingMemberId(null);
+      return;
+    }
+
+    setSuccessMessage(
+      `${member.display_name} wurde aus der Band entfernt.`,
+    );
+
+    await loadBandData();
+    setChangingMemberId(null);
+  }
+
   const activeMembers = members.filter(
     (member) => member.is_active,
   );
@@ -215,11 +338,11 @@ export default function BandManagementPage() {
           </p>
 
           <h1 className="mt-3 text-4xl font-black sm:text-6xl">
-            Bandverwaltung
+            Bandmitglieder
           </h1>
-
+        
           <p className="mt-3 max-w-2xl text-zinc-400">
-            Verwalte die allgemeinen Daten und Mitglieder
+            Verwalte die Banddaten, Zugänge und Mitglieder
             deiner Band.
           </p>
         </header>
@@ -357,41 +480,97 @@ export default function BandManagementPage() {
                   </p>
                 </div>
 
-                <BandMemberInvitation bandId={band.id} />
+                <BandMemberInvitation
+                  bandId={band.id}
+                  onInvitationChanged={() =>
+                    void loadBandData()
+                  }
+                />
               </div>
 
               <div className="mt-6 space-y-3">
-                {activeMembers.map((member) => (
-                  <article
-                    key={member.user_id}
-                    className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-black/20 p-5 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div className="min-w-0">
-                      <h3 className="truncate text-lg font-black">
-                        {member.display_name}
-                      </h3>
+                {activeMembers.map((member) => {
+                  const isCurrentUser =
+                    member.user_id === currentUserId;
+                  const isChanging =
+                    changingMemberId === member.user_id;
+                  const isLastActiveMember =
+                    activeMembers.length <= 1;
 
-                      <p className="mt-1 truncate text-sm text-zinc-400">
-                        {member.email}
-                      </p>
-                    </div>
+                  return (
+                    <article
+                      key={member.user_id}
+                      className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-black/20 p-5 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="truncate text-lg font-black">
+                            {member.display_name}
+                          </h3>
 
-                    <div className="flex items-center gap-3">
-                      {member.user_id ===
-                        (
-                          awaitCurrentUserPlaceholder()
-                        ) && (
-                        <span className="rounded-full bg-red-950/50 px-3 py-1 text-xs font-bold text-red-300">
-                          Du
-                        </span>
-                      )}
+                          {isCurrentUser && (
+                            <span className="rounded-full bg-red-950/50 px-3 py-1 text-xs font-bold text-red-300">
+                              Du
+                            </span>
+                          )}
 
-                      <span className="rounded-full bg-green-950/50 px-3 py-1 text-xs font-bold text-green-300">
-                        Aktiv
-                      </span>
-                    </div>
-                  </article>
-                ))}
+                          <span className="rounded-full bg-green-950/50 px-3 py-1 text-xs font-bold text-green-300">
+                            Aktiv
+                          </span>
+                        </div>
+
+                        <p className="mt-1 truncate text-sm text-zinc-400">
+                          {member.email}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void setMemberActive(
+                              member,
+                              false,
+                            )
+                          }
+                          disabled={
+                            isChanging ||
+                            isLastActiveMember
+                          }
+                          className="rounded-xl bg-zinc-700 px-4 py-3 text-sm font-bold transition hover:bg-zinc-600 disabled:cursor-not-allowed disabled:opacity-40"
+                          title={
+                            isLastActiveMember
+                              ? "Die letzte aktive Person kann nicht deaktiviert werden."
+                              : "Mitglied deaktivieren"
+                          }
+                        >
+                          {isChanging
+                            ? "Wird geändert …"
+                            : "Deaktivieren"}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void removeMember(member)
+                          }
+                          disabled={
+                            isChanging ||
+                            isLastActiveMember
+                          }
+                          className="rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-3 text-sm font-bold text-red-300 transition hover:bg-red-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                          title={
+                            isLastActiveMember
+                              ? "Die letzte aktive Person kann nicht entfernt werden."
+                              : "Mitglied endgültig entfernen"
+                          }
+                        >
+                          Entfernen
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
 
                 {activeMembers.length === 0 && (
                   <div className="rounded-2xl border border-white/10 bg-black/20 p-6 text-center text-zinc-400">
@@ -407,20 +586,63 @@ export default function BandManagementPage() {
                   </h3>
 
                   <div className="mt-3 space-y-3">
-                    {inactiveMembers.map((member) => (
-                      <article
-                        key={member.user_id}
-                        className="rounded-2xl border border-white/5 bg-black/10 p-5 opacity-60"
-                      >
-                        <h4 className="font-bold">
-                          {member.display_name}
-                        </h4>
+                    {inactiveMembers.map((member) => {
+                      const isChanging =
+                        changingMemberId ===
+                        member.user_id;
 
-                        <p className="mt-1 text-sm text-zinc-500">
-                          {member.email}
-                        </p>
-                      </article>
-                    ))}
+                      return (
+                        <article
+                          key={member.user_id}
+                          className="flex flex-col gap-4 rounded-2xl border border-white/5 bg-black/10 p-5 opacity-70 sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h4 className="font-bold">
+                                {member.display_name}
+                              </h4>
+
+                              <span className="rounded-full bg-zinc-800 px-3 py-1 text-xs font-bold text-zinc-400">
+                                Inaktiv
+                              </span>
+                            </div>
+
+                            <p className="mt-1 text-sm text-zinc-500">
+                              {member.email}
+                            </p>
+                          </div>
+
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void setMemberActive(
+                                  member,
+                                  true,
+                                )
+                              }
+                              disabled={isChanging}
+                              className="rounded-xl bg-green-700 px-4 py-3 text-sm font-bold transition hover:bg-green-600 disabled:cursor-wait disabled:opacity-50"
+                            >
+                              {isChanging
+                                ? "Wird geändert …"
+                                : "Reaktivieren"}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void removeMember(member)
+                              }
+                              disabled={isChanging}
+                              className="rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-3 text-sm font-bold text-red-300 transition hover:bg-red-600 hover:text-white disabled:cursor-wait disabled:opacity-50"
+                            >
+                              Entfernen
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -455,13 +677,4 @@ export default function BandManagementPage() {
       </div>
     </main>
   );
-}
-
-/*
- * Vorübergehender Platzhalter.
- * Die Markierung des aktuell angemeldeten Mitglieds
- * ergänzen wir beim nächsten Schritt.
- */
-function awaitCurrentUserPlaceholder() {
-  return "";
 }
