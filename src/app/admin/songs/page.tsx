@@ -10,6 +10,7 @@ import {
     EyeOff,
     Trash2,
     FileUp,
+     FileText,
 } from "lucide-react";
 import PdfShareButton from "../../components/PdfShareButton";
 import { getActiveBandId } from "../../lib/band";
@@ -226,7 +227,7 @@ export default function AdminSongsPage() {
                         file_name: file.name,
                     },
                     {
-                        onConflict: "song_id,user_id",
+                        onConflict: "song_id,user_id,band_id",
                     },
                 );
 
@@ -241,6 +242,13 @@ export default function AdminSongsPage() {
                 updated.add(song.id);
                 return updated;
             });
+
+            setAvailablePdfSongIds((current) => {
+                const updated = new Set(current);
+                updated.add(song.id);
+                return updated;
+            });
+
             alert("PDF erfolgreich gespeichert.");
         } finally {
             setUploadingPdfSongId(null);
@@ -373,13 +381,17 @@ export default function AdminSongsPage() {
     }
 
     return (
-        <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-8 text-white">
+        <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-4 text-white">
             <div className="mx-auto max-w-5xl">
                 <AdminNavigation />
 
-                <h1 className="text-4xl font-black sm:text-5xl">
-                    Songverwaltung
-                </h1>
+                <p className="text-sm font-black uppercase tracking-[0.35em] text-red-500">
+  DEINE SETLIST
+</p>
+
+<h1 className="mt-2 text-4xl font-black sm:text-5xl">
+  Songverwaltung
+</h1>
 
                 <p className="mt-3 text-zinc-400">
                     Durchsuche und verwalte hier dein komplettes Songrepertoire.
@@ -471,7 +483,7 @@ export default function AdminSongsPage() {
                                         >
                                             <td className="px-3 py-4 sm:px-5">
                                                 {editingSongId === song.id ? (
-                                                    <div className="space-y-2">
+                                                    <div className="space-y-3">
                                                         <input
                                                             type="text"
                                                             value={editTitle}
@@ -485,6 +497,68 @@ export default function AdminSongsPage() {
                                                             onChange={(event) => setEditArtist(event.target.value)}
                                                             className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-300 outline-none focus:border-blue-500"
                                                         />
+
+                                                        <div className="flex flex-wrap gap-2 pt-2">
+                                                            <input
+                                                                id={`pdf-upload-${song.id}`}
+                                                                type="file"
+                                                                accept="application/pdf"
+                                                                className="hidden"
+                                                                onChange={(event) => {
+                                                                    const file = event.target.files?.[0];
+
+                                                                    if (file) {
+                                                                        void uploadPdf(song, file);
+                                                                    }
+
+                                                                    event.target.value = "";
+                                                                }}
+                                                            />
+
+                                                            <button
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    document
+                                                                        .getElementById(`pdf-upload-${song.id}`)
+                                                                        ?.click()
+                                                                }
+                                                                disabled={uploadingPdfSongId === song.id}
+                                                                className={`rounded-xl p-2 text-white transition disabled:opacity-50 ${
+                                                                    availablePdfSongIds.has(song.id)
+                                                                        ? "bg-green-600 hover:bg-green-500"
+                                                                        : "bg-red-600 hover:bg-red-500"
+                                                                }`}
+                                                                title={
+                                                                    songsWithPdf.has(song.id)
+                                                                        ? "Eigene PDF hochladen oder ersetzen"
+                                                                        : availablePdfSongIds.has(song.id)
+                                                                          ? "Geteilte PDF vorhanden – eigene PDF hochladen"
+                                                                          : "PDF hochladen"
+                                                                }
+                                                            >
+                                                                <FileUp size={18} />
+                                                            </button>
+
+                                                            {availablePdfSongIds.has(song.id) && (
+                                                                <Link
+                                                                    href={`/admin/pdf/${song.id}`}
+                                                                    className="rounded-xl bg-violet-600 p-2 text-white transition hover:bg-violet-500"
+                                                                    title={
+                                                                        songsWithPdf.has(song.id)
+                                                                            ? "Eigene PDF ansehen"
+                                                                            : "Geteilte PDF ansehen"
+                                                                    }
+                                                                >
+                                                                    <FileText size={18} />
+                                                                </Link>
+                                                            )}
+
+                                                            <PdfShareButton
+                                                                songId={song.id}
+                                                                songTitle={song.title}
+                                                                hasOwnPdf={songsWithPdf.has(song.id)}
+                                                            />
+                                                        </div>
                                                     </div>
                                                 ) : (
                                                     <>
@@ -553,53 +627,6 @@ export default function AdminSongsPage() {
                                                     ) : (
 
                                                         <>
-                                                            <>
-                                                                <input
-                                                                    id={`pdf-upload-${song.id}`}
-                                                                    type="file"
-                                                                    accept="application/pdf"
-                                                                    className="hidden"
-                                                                    onChange={(event) => {
-                                                                        const file = event.target.files?.[0];
-
-                                                                        if (file) {
-                                                                            uploadPdf(song, file);
-                                                                        }
-
-                                                                        event.target.value = "";
-                                                                    }}
-                                                                />
-
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() =>
-                                                                        document
-                                                                            .getElementById(`pdf-upload-${song.id}`)
-                                                                            ?.click()
-                                                                    }
-                                                                    disabled={uploadingPdfSongId === song.id}
-                                                                    className={`rounded-xl p-2 text-white transition disabled:opacity-50 ${availablePdfSongIds.has(song.id)
-                                                                            ? "bg-green-600 hover:bg-green-500"
-                                                                            : "bg-red-600 hover:bg-red-500"
-                                                                        }`}
-                                                                    title={
-                                                                        songsWithPdf.has(song.id)
-                                                                            ? "Eigene PDF hochladen oder ersetzen"
-                                                                            : availablePdfSongIds.has(song.id)
-                                                                                ? "Geteilte PDF vorhanden – eigene PDF hochladen"
-                                                                                : "PDF hochladen"
-                                                                    }
-                                                                >
-                                                                    <FileUp size={18} />
-                                                                </button>
-
-                                                                <PdfShareButton
-                                                                    songId={song.id}
-                                                                    songTitle={song.title}
-                                                                    hasOwnPdf={songsWithPdf.has(song.id)}
-                                                                />
-
-                                                            </>
                                                             <button
                                                                 type="button"
                                                                 onClick={() => {

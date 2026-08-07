@@ -102,6 +102,17 @@ export default function AdminNavigation() {
               </Link>
 
               <Link
+  href="/admin/voting"
+  className={`rounded-2xl px-5 py-3 font-bold transition ${
+    pathname.startsWith("/admin/voting")
+      ? "bg-red-600 text-white"
+      : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+  }`}
+>
+  🗳️ Votingregeln
+</Link>
+
+              <Link
                 href="/archive"
                 className={`rounded-2xl px-5 py-3 font-bold transition ${
                   pathname.startsWith("/archive")

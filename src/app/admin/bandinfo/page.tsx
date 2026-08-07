@@ -10,11 +10,13 @@ import Link from "next/link";
 import AdminNavigation from "../../components/AdminNavigation";
 import BandGalleryManager from "../../components/BandGalleryManager";
 import BandEventsManager from "../../components/BandEventsManager";
+import BandLogoManager from "../../components/BandLogoManager";
 import AccordionSection from "../../components/AccordionSection";
 import { getCurrentBand } from "../../lib/band";
 import { createClient } from "../../lib/client";
 
 type BandInfo = {
+    logo_path: string | null;
     description: string | null;
     instagram_url: string | null;
     facebook_url: string | null;
@@ -38,6 +40,7 @@ export default function BandInfoPage() {
     );
     const [bandName, setBandName] = useState("");
     const [bandSlug, setBandSlug] = useState("");
+    const [logoPath, setLogoPath] = useState<string | null>(null);
 
     const [description, setDescription] = useState("");
     const [instagramUrl, setInstagramUrl] = useState("");
@@ -82,6 +85,7 @@ export default function BandInfoPage() {
                 .from("bands")
                 .select(
                     `
+    logo_path,
     description,
     instagram_url,
     facebook_url,
@@ -103,6 +107,7 @@ export default function BandInfoPage() {
 
             const bandInfo = data as BandInfo | null;
 
+            setLogoPath(bandInfo?.logo_path ?? null);
             setDescription(bandInfo?.description ?? "");
             setInstagramUrl(bandInfo?.instagram_url ?? "");
             setFacebookUrl(bandInfo?.facebook_url ?? "");
@@ -386,7 +391,7 @@ export default function BandInfoPage() {
     }
 
     return (
-        <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-8 text-white sm:px-8">
+        <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-4 text-white sm:px-8">
             <div className="mx-auto max-w-5xl">
                 <AdminNavigation />
 
@@ -426,6 +431,19 @@ export default function BandInfoPage() {
                         onSubmit={saveBandInfo}
                         className="mt-8 space-y-8"
                     >
+                        {bandId !== null && (
+                            <AccordionSection
+                                title="Bandlogo"
+                                icon="🎨"
+                            >
+                                <BandLogoManager
+                                    bandId={bandId}
+                                    logoPath={logoPath}
+                                    onLogoChanged={setLogoPath}
+                                />
+                            </AccordionSection>
+                        )}
+
                         {bandId !== null && (
                             <AccordionSection
                                 title="Bandfotos"

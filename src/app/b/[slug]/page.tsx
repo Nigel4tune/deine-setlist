@@ -9,6 +9,7 @@ type PublicBand = {
   id: number;
   name: string;
   slug: string;
+  logo_path: string | null;
   description: string | null;
   instagram_url: string | null;
   facebook_url: string | null;
@@ -187,6 +188,7 @@ export default function BandPage() {
         id: loadedBandId,
         name: loadedBand.name,
         slug: loadedBand.slug,
+        logo_path: loadedBand.logo_path,
         description: loadedBand.description,
         instagram_url: loadedBand.instagram_url,
         facebook_url: loadedBand.facebook_url,
@@ -397,9 +399,22 @@ export default function BandPage() {
                     Bandprofil
                   </p>
 
-                  <h1 className="mt-5 text-5xl font-black tracking-tight sm:text-7xl">
-                    {band.name}
-                  </h1>
+                  {band.logo_path ? (
+                    <img
+                      src={
+                        supabase.storage
+                          .from("band-media")
+                          .getPublicUrl(band.logo_path)
+                          .data.publicUrl
+                      }
+                      alt={`${band.name} Logo`}
+                      className="mx-auto mt-6 max-h-48 max-w-[85%] object-contain sm:max-h-60"
+                    />
+                  ) : (
+                    <h1 className="mt-5 text-5xl font-black tracking-tight sm:text-7xl">
+                      {band.name}
+                    </h1>
+                  )}
                 </div>
               </div>
             </header>

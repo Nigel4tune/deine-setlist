@@ -15,10 +15,14 @@ type Song = {
   artist: string;
 };
 
+type VoteSongScope = "all" | "outside_setlist";
+
 type PublicBand = {
   id: number;
   name: string;
   slug: string;
+  max_votes: number;
+  vote_song_scope: VoteSongScope;
 };
 
 function normalizeSearchText(text: string) {
@@ -100,6 +104,15 @@ export default function Home() {
         id: Number(loadedBand.id),
         name: loadedBand.name,
         slug: loadedBand.slug,
+        max_votes:
+          typeof loadedBand.max_votes === "number" &&
+          loadedBand.max_votes >= 1
+            ? loadedBand.max_votes
+            : 3,
+        vote_song_scope:
+          loadedBand.vote_song_scope === "all"
+            ? "all"
+            : "outside_setlist",
       });
 
       setBandLoading(false);
@@ -200,9 +213,12 @@ export default function Home() {
         }
       }
 
-      const availableSongs = (songsResponse.data ?? []).filter(
-        (song) => !songIdsInSetlist.has(song.id),
-      );
+      const availableSongs =
+        band.vote_song_scope === "all"
+          ? songsResponse.data ?? []
+          : (songsResponse.data ?? []).filter(
+              (song) => !songIdsInSetlist.has(song.id),
+            );
 
       setSongs(availableSongs);
 
@@ -245,6 +261,10 @@ export default function Home() {
   }, [songs, selectedSongIds]);
 
   function toggleSong(songId: number) {
+    if (!band) {
+      return;
+    }
+
     setSubmitError("");
 
     const isSelected = selectedSongIds.includes(songId);
@@ -256,7 +276,7 @@ export default function Home() {
       return;
     }
 
-    if (selectedSongIds.length >= 3) {
+    if (selectedSongIds.length >= band.max_votes) {
       return;
     }
 
@@ -268,7 +288,10 @@ export default function Home() {
       setSubmitError("Die Band konnte nicht geladen werden.");
       return;
     }
-    if (selectedSongs.length !== 3 || isSubmitting) {
+    if (
+      selectedSongs.length !== band.max_votes ||
+      isSubmitting
+    ) {
       return;
     }
 
@@ -341,8 +364,9 @@ export default function Home() {
       const normalizedMessage = message.toLowerCase();
 
       if (
-        normalizedMessage.includes("maximum of three") ||
-        normalizedMessage.includes("maximal drei") ||
+        normalizedMessage.includes(
+          "maximale anzahl an songwünschen",
+        ) ||
         normalizedMessage.includes("bereits abgestimmt")
       ) {
         setHasAlreadyVoted(true);
@@ -483,7 +507,7 @@ export default function Home() {
           </h1>
 
           <p className="mt-4 text-zinc-300">
-            Vielen Dank. Deine drei Wünsche wurden gespeichert.
+            Vielen Dank. Deine Wünsche wurden gespeichert.
           </p>
 
           <button
@@ -532,7 +556,9 @@ export default function Home() {
           </p>
 
           <p className="mt-3 text-zinc-500">
-            Wähle drei deiner Favoriten.
+            {band.max_votes === 1
+              ? "Wähle deinen Favoriten."
+              : `Wähle ${band.max_votes} deiner Favoriten.`}
           </p>
 
           <button
@@ -626,7 +652,9 @@ export default function Home() {
           </h1>
 
           <p className="mt-4 text-zinc-300">
-            Wähle drei Songs.
+            {band.max_votes === 1
+              ? "Wähle einen Song."
+              : `Wähle ${band.max_votes} Songs.`}
           </p>
         </header>
 
@@ -637,21 +665,28 @@ export default function Home() {
             </p>
 
             <p className="mt-1 text-lg font-bold">
-              {selectedSongIds.length} von 3 Songs
+              {selectedSongIds.length} von {band.max_votes}{" "}
+              {band.max_votes === 1 ? "Song" : "Songs"}
             </p>
           </div>
 
-          <div className="flex gap-2">
-            {[1, 2, 3].map((number) => (
-              <span
-                key={number}
-                className={`h-3 w-3 rounded-full ${selectedSongIds.length >= number
-                  ? "bg-red-500"
-                  : "bg-zinc-700"
+          {band.max_votes <= 10 && (
+            <div className="flex gap-2">
+              {Array.from(
+                { length: band.max_votes },
+                (_, index) => index + 1,
+              ).map((number) => (
+                <span
+                  key={number}
+                  className={`h-3 w-3 rounded-full ${
+                    selectedSongIds.length >= number
+                      ? "bg-red-500"
+                      : "bg-zinc-700"
                   }`}
-              />
-            ))}
-          </div>
+                />
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="mt-5">
@@ -671,7 +706,8 @@ export default function Home() {
             const isSelected = selectedSongIds.includes(song.id);
 
             const selectionIsFull =
-              selectedSongIds.length >= 3 && !isSelected;
+              selectedSongIds.length >= band.max_votes &&
+              !isSelected;
 
             return (
               <button
@@ -725,7 +761,8 @@ export default function Home() {
           type="button"
           onClick={submitVotes}
           disabled={
-            selectedSongIds.length !== 3 || isSubmitting
+            selectedSongIds.length !== band.max_votes ||
+            isSubmitting
           }
           className="mt-7 w-full rounded-2xl bg-red-600 px-6 py-5 text-xl font-black transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-400"
         >
