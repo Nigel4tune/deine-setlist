@@ -120,7 +120,7 @@ export default function AdminNavigation() {
                     : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
                 }`}
               >
-                📊 Analytics
+                🗃️ Archiv
               </Link>
 
               <Link

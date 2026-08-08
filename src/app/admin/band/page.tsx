@@ -13,6 +13,8 @@ import { createClient } from "../../lib/client";
 import {
   CurrentBand,
   getCurrentBand,
+  getUserBands,
+  setActiveBand,
 } from "../../lib/band";
 
 type BandMember = {
@@ -36,6 +38,11 @@ export default function BandManagementPage() {
 
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeletingBand, setIsDeletingBand] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] =
+    useState(false);
+  const [deleteConfirmationName, setDeleteConfirmationName] =
+    useState("");
 
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -319,6 +326,158 @@ export default function BandManagementPage() {
     setChangingMemberId(null);
   }
 
+  async function deleteBandAccount() {
+    if (!band || isDeletingBand) {
+      return;
+    }
+
+    if (
+      deleteConfirmationName.trim() !==
+      band.name.trim()
+    ) {
+      setErrorMessage(
+        "Der eingegebene Bandname stimmt nicht mit dem aktuellen Bandnamen überein.",
+      );
+      return;
+    }
+
+    setIsDeletingBand(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    const supabase = createClient();
+
+    try {
+      /*
+       * Zuerst alle Storage-Dateien ermitteln,
+       * solange die Band und ihre Datensätze noch existieren.
+       */
+      const {
+        data: storageFiles,
+        error: storagePathsError,
+      } = await supabase.rpc(
+        "get_band_deletion_storage_paths",
+        {
+          requested_band_id: band.id,
+        },
+      );
+
+      if (storagePathsError) {
+        throw new Error(
+          `Dateien der Band konnten nicht ermittelt werden: ${storagePathsError.message}`,
+        );
+      }
+
+      const pathsByBucket = new Map<string, string[]>();
+
+      for (const file of storageFiles ?? []) {
+        const bucketName =
+          typeof file.bucket_name === "string"
+            ? file.bucket_name
+            : "";
+
+        const storagePath =
+          typeof file.storage_path === "string"
+            ? file.storage_path
+            : "";
+
+        if (!bucketName || !storagePath) {
+          continue;
+        }
+
+        const currentPaths =
+          pathsByBucket.get(bucketName) ?? [];
+
+        if (!currentPaths.includes(storagePath)) {
+          currentPaths.push(storagePath);
+        }
+
+        pathsByBucket.set(
+          bucketName,
+          currentPaths,
+        );
+      }
+
+      /*
+       * Dateien aus allen betroffenen Buckets entfernen.
+       * Erst wenn das geklappt hat, wird die Datenbank gelöscht.
+       */
+      for (const [bucketName, paths] of pathsByBucket) {
+        if (paths.length === 0) {
+          continue;
+        }
+
+        const { error: storageDeleteError } =
+          await supabase.storage
+            .from(bucketName)
+            .remove(paths);
+
+        if (storageDeleteError) {
+          throw new Error(
+            `Dateien aus „${bucketName}“ konnten nicht gelöscht werden: ${storageDeleteError.message}`,
+          );
+        }
+      }
+
+      /*
+       * Jetzt die Band löschen.
+       * Die abhängigen Daten verschwinden über ON DELETE CASCADE.
+       */
+      const { error: deleteError } =
+        await supabase.rpc(
+          "delete_band_account",
+          {
+            requested_band_id: band.id,
+            confirmation_name:
+              deleteConfirmationName.trim(),
+          },
+        );
+
+      if (deleteError) {
+        throw new Error(
+          deleteError.message ||
+            "Das Bandkonto konnte nicht aufgelöst werden.",
+        );
+      }
+
+      /*
+       * Nach dem Löschen prüfen, ob der Benutzer
+       * noch weitere aktive Bandmitgliedschaften besitzt.
+       */
+      const remainingBands =
+        await getUserBands();
+
+      if (remainingBands.length > 0) {
+        await setActiveBand(
+          remainingBands[0].id,
+        );
+
+        window.location.href = "/admin";
+        return;
+      }
+
+      /*
+       * Das persönliche Benutzerkonto bleibt bestehen.
+       * Ohne weitere Band verlassen wir aber den Adminbereich,
+       * damit keine Seite mit fehlender Band geladen wird.
+       */
+      window.location.href = "/admin-login";
+    } catch (error) {
+      console.error(
+        "Bandkonto konnte nicht aufgelöst werden:",
+        error,
+      );
+
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Das Bandkonto konnte nicht aufgelöst werden.",
+      );
+
+      setIsDeletingBand(false);
+    }
+  }
+
   const activeMembers = members.filter(
     (member) => member.is_active,
   );
@@ -328,7 +487,7 @@ export default function BandManagementPage() {
   );
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-8 text-white sm:px-8">
+    <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-zinc-900 to-black px-5 py-4 text-white sm:px-8">
       <div className="mx-auto max-w-5xl">
         <AdminNavigation />
 
@@ -658,16 +817,23 @@ export default function BandManagementPage() {
               </h2>
 
               <p className="mt-3 max-w-2xl text-sm leading-relaxed text-zinc-400">
-                Das vollständige Auflösen des Bandkontos wird
-                später mit einer zusätzlichen Sicherheitsabfrage
-                eingerichtet. Dabei werden alle zur Band
-                gehörenden Daten berücksichtigt.
+                Beim Auflösen werden die Band und alle dazugehörigen
+                Daten dauerhaft gelöscht. Dazu gehören unter anderem
+                Songs, Konzerte, Stimmen, gespeicherte Setlists,
+                Bandmitglieder, Einladungen, Bandfotos und Song-PDFs.
+                Dein persönliches Benutzerkonto bleibt bestehen.
               </p>
 
               <button
                 type="button"
-                disabled
-                className="mt-5 cursor-not-allowed rounded-2xl border border-red-500/30 bg-red-950/30 px-5 py-3 font-bold text-red-300 opacity-60"
+                onClick={() => {
+                  setDeleteConfirmationName("");
+                  setErrorMessage("");
+                  setSuccessMessage("");
+                  setIsDeleteDialogOpen(true);
+                }}
+                disabled={isDeletingBand}
+                className="mt-5 rounded-2xl border border-red-500/40 bg-red-950/40 px-5 py-3 font-black text-red-300 transition hover:bg-red-600 hover:text-white disabled:cursor-wait disabled:opacity-50"
               >
                 Bandkonto auflösen
               </button>
@@ -675,6 +841,81 @@ export default function BandManagementPage() {
           </div>
         ) : null}
       </div>
+
+      {isDeleteDialogOpen && band && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4">
+          <div className="w-full max-w-xl rounded-3xl border border-red-500/30 bg-zinc-950 p-6 shadow-2xl sm:p-8">
+            <p className="text-sm font-bold uppercase tracking-[0.25em] text-red-400">
+              Endgültig löschen
+            </p>
+
+            <h2 className="mt-2 text-3xl font-black">
+              {band.name} auflösen?
+            </h2>
+
+            <p className="mt-4 leading-relaxed text-zinc-400">
+              Diese Aktion kann nicht rückgängig gemacht werden.
+              Alle Daten und Dateien dieser Band werden dauerhaft
+              gelöscht. Dein persönlicher Login bleibt erhalten.
+            </p>
+
+            <div className="mt-6 rounded-2xl border border-red-500/20 bg-red-950/20 p-5">
+              <p className="text-sm text-zinc-300">
+                Gib zur Bestätigung den Bandnamen exakt ein:
+              </p>
+
+              <p className="mt-2 font-black text-red-300">
+                {band.name}
+              </p>
+
+              <input
+                type="text"
+                value={deleteConfirmationName}
+                onChange={(event) =>
+                  setDeleteConfirmationName(
+                    event.target.value,
+                  )
+                }
+                disabled={isDeletingBand}
+                autoComplete="off"
+                className="mt-4 w-full rounded-2xl border border-white/10 bg-black/40 px-5 py-4 text-white outline-none focus:border-red-500 disabled:opacity-50"
+                placeholder={band.name}
+              />
+            </div>
+
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDeleteDialogOpen(false);
+                  setDeleteConfirmationName("");
+                }}
+                disabled={isDeletingBand}
+                className="rounded-2xl bg-zinc-800 px-5 py-4 font-bold transition hover:bg-zinc-700 disabled:cursor-wait disabled:opacity-50"
+              >
+                Abbrechen
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  void deleteBandAccount()
+                }
+                disabled={
+                  isDeletingBand ||
+                  deleteConfirmationName.trim() !==
+                    band.name.trim()
+                }
+                className="rounded-2xl bg-red-600 px-5 py-4 font-black text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"
+              >
+                {isDeletingBand
+                  ? "Band wird endgültig gelöscht …"
+                  : "Band endgültig löschen"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

@@ -149,7 +149,33 @@ export default function Home() {
           return;
         }
 
-        setHasAlreadyVoted(Boolean(alreadyVoted));
+        const hasVoted = Boolean(alreadyVoted);
+        setHasAlreadyVoted(hasVoted);
+
+        if (hasVoted) {
+          const { data: existingVotes, error: existingVotesError } =
+            await supabase
+              .from("votes")
+              .select("song_id")
+              .eq("concert_id", concertId)
+              .eq("device_id", deviceId);
+
+          if (existingVotesError) {
+            console.error(
+              "Vorhandene Auswahl konnte nicht geladen werden:",
+              existingVotesError.message,
+              existingVotesError.code,
+              existingVotesError.details,
+              existingVotesError.hint,
+            );
+          } else {
+            setSelectedSongIds(
+              (existingVotes ?? [])
+                .map((vote) => Number(vote.song_id))
+                .filter((songId) => Number.isFinite(songId)),
+            );
+          }
+        }
       } catch {
         setHasAlreadyVoted(false);
       } finally {
@@ -289,7 +315,8 @@ export default function Home() {
       return;
     }
     if (
-      selectedSongs.length !== band.max_votes ||
+      selectedSongs.length < 1 ||
+      selectedSongs.length > band.max_votes ||
       isSubmitting
     ) {
       return;
@@ -341,7 +368,6 @@ export default function Home() {
       // bevor selectedSongIds geleert wird.
       setSubmittedSongs(selectedSongs);
       setHasAlreadyVoted(true);
-      setSelectedSongIds([]);
       setScreen("thanks");
     } catch (error: unknown) {
       let message = "Unbekannter Fehler";
@@ -431,7 +457,6 @@ export default function Home() {
         return;
       }
 
-      setSelectedSongIds([]);
       setSubmittedSongs([]);
       setSearchTerm("");
       setSubmitError("");
@@ -558,7 +583,7 @@ export default function Home() {
           <p className="mt-3 text-zinc-500">
             {band.max_votes === 1
               ? "Wähle deinen Favoriten."
-              : `Wähle ${band.max_votes} deiner Favoriten.`}
+              : `Wähle bis zu ${band.max_votes} deiner Favoriten.`}
           </p>
 
           <button
@@ -654,31 +679,64 @@ export default function Home() {
           <p className="mt-4 text-zinc-300">
             {band.max_votes === 1
               ? "Wähle einen Song."
-              : `Wähle ${band.max_votes} Songs.`}
+              : `Wähle bis zu ${band.max_votes} Songs.`}
           </p>
         </header>
 
-        <div className="sticky top-3 z-10 mt-8 flex items-center justify-between rounded-2xl border border-white/10 bg-zinc-900/95 p-5 shadow-xl backdrop-blur">
-          <div>
-            <p className="text-sm text-zinc-400">
-              Deine Auswahl
-            </p>
+        <div className="sticky top-3 z-20 mt-8 rounded-2xl border border-white/10 bg-zinc-900/95 p-4 shadow-xl backdrop-blur sm:p-5">
+          <div className="flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm text-zinc-400">
+                Deine Auswahl
+              </p>
 
-            <p className="mt-1 text-lg font-bold">
-              {selectedSongIds.length} von {band.max_votes}{" "}
-              {band.max_votes === 1 ? "Song" : "Songs"}
-            </p>
+              <p className="mt-1 font-bold sm:text-lg">
+                {selectedSongIds.length} von {band.max_votes}{" "}
+                {band.max_votes === 1 ? "Song" : "Songs"}
+              </p>
+            </div>
+
+            {band.max_votes <= 10 && (
+              <div className="hidden shrink-0 gap-2 sm:flex">
+                {Array.from(
+                  { length: band.max_votes },
+                  (_, index) => index + 1,
+                ).map((number) => (
+                  <span
+                    key={number}
+                    className={`h-3 w-3 rounded-full ${
+                      selectedSongIds.length >= number
+                        ? "bg-red-500"
+                        : "bg-zinc-700"
+                    }`}
+                  />
+                ))}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={submitVotes}
+              disabled={
+                selectedSongIds.length < 1 ||
+                selectedSongIds.length > band.max_votes ||
+                isSubmitting
+              }
+              className="shrink-0 rounded-xl bg-red-600 px-4 py-3 text-sm font-black transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-400 sm:px-5"
+            >
+              {isSubmitting ? "Speichert …" : "Abstimmen"}
+            </button>
           </div>
 
           {band.max_votes <= 10 && (
-            <div className="flex gap-2">
+            <div className="mt-3 flex gap-2 sm:hidden">
               {Array.from(
                 { length: band.max_votes },
                 (_, index) => index + 1,
               ).map((number) => (
                 <span
                   key={number}
-                  className={`h-3 w-3 rounded-full ${
+                  className={`h-2.5 w-2.5 rounded-full ${
                     selectedSongIds.length >= number
                       ? "bg-red-500"
                       : "bg-zinc-700"
@@ -756,20 +814,6 @@ export default function Home() {
             {submitError}
           </div>
         )}
-
-        <button
-          type="button"
-          onClick={submitVotes}
-          disabled={
-            selectedSongIds.length !== band.max_votes ||
-            isSubmitting
-          }
-          className="mt-7 w-full rounded-2xl bg-red-600 px-6 py-5 text-xl font-black transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-400"
-        >
-          {isSubmitting
-            ? "Wünsche werden gespeichert..."
-            : "Abstimmen"}
-        </button>
 
         <button
           type="button"

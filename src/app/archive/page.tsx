@@ -27,17 +27,27 @@ type RankingSong = {
   votes: number;
 };
 
-type AnalyticsView = "ranking" | "history";
+type SavedSetlist = {
+  id: number;
+  name: string;
+  created_at: string;
+  itemCount: number;
+};
+
+type AnalyticsView = "ranking" | "history" | "setlists";
 
 export default function ArchivePage() {
   const [view, setView] =
     useState<AnalyticsView>("ranking");
   const [concerts, setConcerts] = useState<Concert[]>([]);
   const [ranking, setRanking] = useState<RankingSong[]>([]);
+  const [savedSetlists, setSavedSetlists] = useState<SavedSetlist[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<number | null>(
     null,
   );
+  const [deletingSetlistId, setDeletingSetlistId] =
+    useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
@@ -50,6 +60,54 @@ export default function ArchivePage() {
 
     try {
       const activeBandId = await getActiveBandId();
+
+      const [
+        savedSetlistsResponse,
+        savedSetlistItemsResponse,
+      ] = await Promise.all([
+        supabase
+          .from("saved_setlists")
+          .select("id, name, created_at")
+          .eq("band_id", activeBandId)
+          .order("created_at", { ascending: false }),
+
+        supabase
+          .from("saved_setlist_items")
+          .select("saved_setlist_id")
+          .eq("band_id", activeBandId),
+      ]);
+
+      if (savedSetlistsResponse.error) {
+        throw new Error(
+          `Gespeicherte Setlists konnten nicht geladen werden: ${savedSetlistsResponse.error.message}`,
+        );
+      }
+
+      if (savedSetlistItemsResponse.error) {
+        throw new Error(
+          `Setlist-Einträge konnten nicht geladen werden: ${savedSetlistItemsResponse.error.message}`,
+        );
+      }
+
+      const itemCounts = new Map<number, number>();
+
+      for (const item of savedSetlistItemsResponse.data ?? []) {
+        const savedSetlistId = Number(item.saved_setlist_id);
+
+        itemCounts.set(
+          savedSetlistId,
+          (itemCounts.get(savedSetlistId) ?? 0) + 1,
+        );
+      }
+
+      setSavedSetlists(
+        (savedSetlistsResponse.data ?? []).map((savedSetlist) => ({
+          id: Number(savedSetlist.id),
+          name: savedSetlist.name,
+          created_at: savedSetlist.created_at,
+          itemCount: itemCounts.get(Number(savedSetlist.id)) ?? 0,
+        })),
+      );
 
       const concertResponse = await supabase
         .from("concerts")
@@ -128,17 +186,18 @@ export default function ArchivePage() {
       setRanking(topTen);
     } catch (error) {
       console.error(
-        "Analytics konnten nicht geladen werden:",
+        "Archiv konnte nicht geladen werden:",
         error,
       );
 
       setConcerts([]);
       setRanking([]);
+      setSavedSetlists([]);
 
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : "Die Analytics konnten nicht geladen werden.",
+          : "Das Archiv konnte nicht geladen werden.",
       );
     } finally {
       setLoading(false);
@@ -197,6 +256,66 @@ export default function ArchivePage() {
     setDeletingId(null);
   }
 
+  async function deleteSavedSetlist(
+    savedSetlist: SavedSetlist,
+  ) {
+    const confirmed = window.confirm(
+      `Gespeicherte Setlist „${savedSetlist.name}“ endgültig löschen?\n\nDiese Aktion kann nicht rückgängig gemacht werden.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingSetlistId(savedSetlist.id);
+    setErrorMessage("");
+
+    try {
+      const activeBandId = await getActiveBandId();
+
+      const { error: itemsDeleteError } = await supabase
+        .from("saved_setlist_items")
+        .delete()
+        .eq("saved_setlist_id", savedSetlist.id)
+        .eq("band_id", activeBandId);
+
+      if (itemsDeleteError) {
+        throw new Error(
+          `Setlist-Einträge konnten nicht gelöscht werden: ${itemsDeleteError.message}`,
+        );
+      }
+
+      const { error: setlistDeleteError } = await supabase
+        .from("saved_setlists")
+        .delete()
+        .eq("id", savedSetlist.id)
+        .eq("band_id", activeBandId);
+
+      if (setlistDeleteError) {
+        throw new Error(
+          `Gespeicherte Setlist konnte nicht gelöscht werden: ${setlistDeleteError.message}`,
+        );
+      }
+
+      setSavedSetlists((current) =>
+        current.filter((item) => item.id !== savedSetlist.id),
+      );
+    } catch (error) {
+      console.error(
+        "Gespeicherte Setlist konnte nicht gelöscht werden:",
+        error,
+      );
+
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Die gespeicherte Setlist konnte nicht gelöscht werden.",
+      );
+    } finally {
+      setDeletingSetlistId(null);
+    }
+  }
+
   function getPosition(index: number) {
     if (index === 0) {
       return "🥇";
@@ -224,11 +343,11 @@ export default function ArchivePage() {
   </p>
 
   <h1 className="mt-2 text-5xl font-black sm:text-6xl">
-    Analytics
+    Archiv
   </h1>
 
   <p className="mt-2 max-w-3xl text-lg text-zinc-400">
-    Vergangene Konzerte und die beliebtesten Publikumswünsche im Überblick.
+    Rankings, vergangene Konzerte und gespeicherte Setlists im Überblick.
   </p>
 </div>
 
@@ -238,8 +357,8 @@ export default function ArchivePage() {
           </div>
         )}
 
-        <div className="mb-8 flex justify-center sm:justify-start">
-          <div className="inline-flex rounded-2xl border border-white/10 bg-zinc-900 p-1">
+        <div className="mb-8">
+          <div className="grid w-full grid-cols-1 gap-1 rounded-2xl border border-white/10 bg-zinc-900 p-1 sm:inline-grid sm:w-auto sm:grid-cols-3">
             <button
               type="button"
               onClick={() => setView("ranking")}
@@ -259,14 +378,25 @@ export default function ArchivePage() {
                 : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
                 }`}
             >
-              🕘 History
+              🎤 Konzert-Archiv
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setView("setlists")}
+              className={`rounded-xl px-5 py-3 font-black transition ${view === "setlists"
+                ? "bg-red-600 text-white"
+                : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                }`}
+            >
+              📚 Setlist-Archiv
             </button>
           </div>
         </div>
 
         {loading ? (
           <div className="rounded-3xl border border-white/10 bg-zinc-900 p-10 text-center text-zinc-400">
-            Analytics werden geladen …
+            Archiv wird geladen …
           </div>
         ) : view === "ranking" ? (
           <section className="mx-auto max-w-3xl">
@@ -333,11 +463,84 @@ export default function ArchivePage() {
               </ol>
             )}
           </section>
+        ) : view === "setlists" ? (
+          <section className="mx-auto max-w-4xl">
+            <div className="mb-5">
+              <h2 className="text-2xl font-black sm:text-3xl">
+                Gespeicherte Setlists
+              </h2>
+
+              <p className="mt-1 text-sm text-zinc-500">
+                {savedSetlists.length} gespeicherte{" "}
+                {savedSetlists.length === 1 ? "Setlist" : "Setlists"}
+              </p>
+            </div>
+
+            {savedSetlists.length === 0 ? (
+              <div className="rounded-3xl border border-white/10 bg-zinc-900/70 p-8 text-zinc-400">
+                Es wurde noch keine Setlist gespeichert.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {savedSetlists.map((savedSetlist) => (
+                  <article
+                    key={savedSetlist.id}
+                    className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-zinc-900/80 p-5 transition hover:border-white/25 sm:flex-row sm:items-center"
+                  >
+                    <Link
+                      href={`/archive/setlists/${savedSetlist.id}`}
+                      className="min-w-0 flex-1"
+                    >
+                      <h3 className="truncate text-xl font-black">
+                        {savedSetlist.name}
+                      </h3>
+
+                      <p className="mt-1 text-sm text-zinc-500">
+                        Gespeichert am{" "}
+                        {new Date(
+                          savedSetlist.created_at,
+                        ).toLocaleString("de-DE", {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })}
+                      </p>
+
+                      <p className="mt-2 text-sm text-zinc-400">
+                        {savedSetlist.itemCount}{" "}
+                        {savedSetlist.itemCount === 1
+                          ? "Eintrag"
+                          : "Einträge"}
+                      </p>
+
+                      <p className="mt-3 text-sm font-bold text-red-400">
+                        Setlist ansehen →
+                      </p>
+                    </Link>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void deleteSavedSetlist(savedSetlist)
+                      }
+                      disabled={
+                        deletingSetlistId === savedSetlist.id
+                      }
+                      className="shrink-0 rounded-xl bg-red-950 px-4 py-3 font-bold text-red-300 transition hover:bg-red-900 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {deletingSetlistId === savedSetlist.id
+                        ? "Lösche …"
+                        : "🗑 Löschen"}
+                    </button>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
         ) : (
           <section className="mx-auto max-w-4xl">
             <div className="mb-5">
               <h2 className="text-2xl font-black sm:text-3xl">
-                Vergangene Konzerte
+                Konzert-Archiv
               </h2>
 
               <p className="mt-1 text-sm text-zinc-500">
